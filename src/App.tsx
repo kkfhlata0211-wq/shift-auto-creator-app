@@ -1,0 +1,131 @@
+import { useState, useMemo, useEffect } from 'react';
+import { Header } from './components/Header';
+import { ShiftMatrix } from './components/ShiftMatrix';
+import { ViolationPanel } from './components/ViolationPanel';
+import { MonthlySchedulePlan, ShiftTypeId } from './types/shift';
+import { createInitialSchedule } from './mock/initialData';
+import { validateSchedule } from './engine/validator';
+import { generateAutomatedSchedule } from './engine/generator';
+import { loadPlanFromStorage, savePlanToStorage } from './utils/storage';
+
+export function App() {
+  const [plan, setPlan] = useState<MonthlySchedulePlan>(() => {
+    const saved = loadPlanFromStorage();
+    if (saved) return saved;
+    return createInitialSchedule('2026-11');
+  });
+
+  const [isGenerating, setIsGenerating] = useState(false);
+
+  // 変更があるたびに LocalStorage に自動保存
+  useEffect(() => {
+    savePlanToStorage(plan);
+  }, [plan]);
+
+  // リアルタイムに制約ルール違反・警告を再計算
+  const validation = useMemo(() => {
+    return validateSchedule(plan);
+  }, [plan]);
+
+  // 自動シフト作成の実行
+  const handleAutoGenerate = () => {
+    setIsGenerating(true);
+    // UIの描画更新を挟んでから計算実行
+    setTimeout(() => {
+      const generatedAssignments = generateAutomatedSchedule(plan, { preserveLocked: true });
+      setPlan((prev) => ({
+        ...prev,
+        assignments: generatedAssignments,
+        updatedAt: new Date().toISOString(),
+      }));
+      setIsGenerating(false);
+    }, 200);
+  };
+
+  // 手動セルの更新
+  const handleUpdateAssignment = (
+    staffId: string,
+    date: string,
+    shiftTypeId: ShiftTypeId,
+    isLocked = true
+  ) => {
+    const key = `${staffId}_${date}`;
+    setPlan((prev) => ({
+      ...prev,
+      assignments: {
+        ...prev.assignments,
+        [key]: {
+          staffId,
+          date,
+          shiftTypeId,
+          isLocked,
+          isRequested: false,
+        },
+      },
+      updatedAt: new Date().toISOString(),
+    }));
+  };
+
+  // セルのロック切り替え
+  const handleToggleLock = (staffId: string, date: string) => {
+    const key = `${staffId}_${date}`;
+    const current = plan.assignments[key];
+    if (!current) return;
+
+    setPlan((prev) => ({
+      ...prev,
+      assignments: {
+        ...prev.assignments,
+        [key]: {
+          ...current,
+          isLocked: !current.isLocked,
+        },
+      },
+      updatedAt: new Date().toISOString(),
+    }));
+  };
+
+  // リセット
+  const handleReset = () => {
+    if (window.confirm('シフトの自動割当をクリアして初期状態に戻しますか？（確定ロックも解除されます）')) {
+      const initial = createInitialSchedule(plan.yearMonth);
+      setPlan(initial);
+    }
+  };
+
+  // JSON復元
+  const handleImportJson = (imported: MonthlySchedulePlan) => {
+    if (imported && imported.staffList && imported.assignments) {
+      setPlan(imported);
+    } else {
+      alert('無効なシフトデータファイルです。');
+    }
+  };
+
+  return (
+    <div className="flex flex-col h-screen overflow-hidden bg-slate-100">
+      {/* 上部ヘッダー */}
+      <Header
+        plan={plan}
+        onAutoGenerate={handleAutoGenerate}
+        onReset={handleReset}
+        onImportJson={handleImportJson}
+        violationCount={validation.violations.length}
+        isGenerating={isGenerating}
+      />
+
+      {/* メイン: シフト表マトリクス */}
+      <ShiftMatrix
+        plan={plan}
+        validation={validation}
+        onUpdateAssignment={handleUpdateAssignment}
+        onToggleLock={handleToggleLock}
+      />
+
+      {/* 下部: リアルタイム警告・違反ドロワー */}
+      <ViolationPanel violations={validation.violations} />
+    </div>
+  );
+}
+
+export default App;
