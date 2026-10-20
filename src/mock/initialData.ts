@@ -192,6 +192,12 @@ export const DEFAULT_RULES: ConstraintRules = {
   balanceWeekendShifts: true,
   balanceNightShifts: true,
   minRestHoursBetweenShifts: 11,
+  defaultRequirements: {
+    EARLY: 1,
+    DAY: 2,
+    LATE: 1,
+    NIGHT: 1,
+  },
 };
 
 export function createInitialSchedule(yearMonth: string = '2026-11'): MonthlySchedulePlan {

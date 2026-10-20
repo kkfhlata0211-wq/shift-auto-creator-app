@@ -1,5 +1,5 @@
 import React from 'react';
-import { Play, Sparkles, Download, Upload, FileSpreadsheet, RotateCcw, AlertTriangle } from 'lucide-react';
+import { Play, Sparkles, Download, Upload, FileSpreadsheet, RotateCcw, AlertTriangle, Users, Sliders } from 'lucide-react';
 import { MonthlySchedulePlan } from '../types/shift';
 import { exportPlanAsCsv, exportPlanAsJson } from '../utils/storage';
 
@@ -8,6 +8,8 @@ interface HeaderProps {
   onAutoGenerate: () => void;
   onReset: () => void;
   onImportJson: (imported: MonthlySchedulePlan) => void;
+  onOpenStaffModal: () => void;
+  onOpenSettingsModal: () => void;
   violationCount: number;
   isGenerating?: boolean;
 }
@@ -17,6 +19,8 @@ export const Header: React.FC<HeaderProps> = ({
   onAutoGenerate,
   onReset,
   onImportJson,
+  onOpenStaffModal,
+  onOpenSettingsModal,
   violationCount,
   isGenerating = false,
 }) => {
@@ -75,6 +79,24 @@ export const Header: React.FC<HeaderProps> = ({
               <span>制約ルール遵守OK</span>
             </div>
           )}
+
+          {/* スタッフ管理ボタン */}
+          <button
+            onClick={onOpenStaffModal}
+            className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold border border-slate-300 transition-colors"
+          >
+            <Users className="w-4 h-4 text-blue-600" />
+            <span>スタッフ管理</span>
+          </button>
+
+          {/* 条件・ルール設定ボタン */}
+          <button
+            onClick={onOpenSettingsModal}
+            className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold border border-slate-300 transition-colors"
+          >
+            <Sliders className="w-4 h-4 text-slate-600" />
+            <span>条件・ルール</span>
+          </button>
 
           {/* 自動作成ボタン */}
           <button

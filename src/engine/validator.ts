@@ -147,11 +147,11 @@ export function validateSchedule(plan: MonthlySchedulePlan): ValidationSummary {
       if (shiftId === 'NIGHT') nightCount++;
     });
 
-    // デフォルト必要人員（医療・介護病棟基準）: 早番1, 日勤2, 遅番1, 夜勤1
-    const reqEarly = 1;
-    const reqDay = 2;
-    const reqLate = 1;
-    const reqNight = 1;
+    // 必要人員（設定値から動的取得）: 早番, 日勤, 遅番, 夜勤
+    const reqEarly = plan.rules.defaultRequirements?.EARLY ?? 1;
+    const reqDay = plan.rules.defaultRequirements?.DAY ?? 2;
+    const reqLate = plan.rules.defaultRequirements?.LATE ?? 1;
+    const reqNight = plan.rules.defaultRequirements?.NIGHT ?? 1;
 
     const isDeficit =
       earlyCount < reqEarly ||

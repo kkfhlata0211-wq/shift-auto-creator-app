@@ -80,6 +80,12 @@ export interface ConstraintRules {
   balanceWeekendShifts: boolean;    // 土日祝の出勤回数平準化
   balanceNightShifts: boolean;      // 夜勤回数の平準化
   minRestHoursBetweenShifts: number;// 勤務間インターバル（例: 遅番翌日の早番禁止：11時間以上推奨）
+  defaultRequirements: {
+    EARLY: number;
+    DAY: number;
+    LATE: number;
+    NIGHT: number;
+  };
 }
 
 // ルール違反・警告情報

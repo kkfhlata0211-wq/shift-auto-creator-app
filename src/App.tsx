@@ -2,7 +2,9 @@ import { useState, useMemo, useEffect } from 'react';
 import { Header } from './components/Header';
 import { ShiftMatrix } from './components/ShiftMatrix';
 import { ViolationPanel } from './components/ViolationPanel';
-import { MonthlySchedulePlan, ShiftTypeId } from './types/shift';
+import { StaffModal } from './components/StaffModal';
+import { SettingsModal } from './components/SettingsModal';
+import { MonthlySchedulePlan, ShiftTypeId, Staff, ConstraintRules } from './types/shift';
 import { createInitialSchedule } from './mock/initialData';
 import { validateSchedule } from './engine/validator';
 import { generateAutomatedSchedule } from './engine/generator';
@@ -16,6 +18,8 @@ export function App() {
   });
 
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isStaffModalOpen, setIsStaffModalOpen] = useState(false);
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
 
   // 変更があるたびに LocalStorage に自動保存
   useEffect(() => {
@@ -85,6 +89,24 @@ export function App() {
     }));
   };
 
+  // スタッフ一覧の更新
+  const handleUpdateStaffList = (newStaffList: Staff[]) => {
+    setPlan((prev) => ({
+      ...prev,
+      staffList: newStaffList,
+      updatedAt: new Date().toISOString(),
+    }));
+  };
+
+  // ルール・必要人員設定の更新
+  const handleUpdateRules = (newRules: ConstraintRules) => {
+    setPlan((prev) => ({
+      ...prev,
+      rules: newRules,
+      updatedAt: new Date().toISOString(),
+    }));
+  };
+
   // リセット
   const handleReset = () => {
     if (window.confirm('シフトの自動割当をクリアして初期状態に戻しますか？（確定ロックも解除されます）')) {
@@ -110,6 +132,8 @@ export function App() {
         onAutoGenerate={handleAutoGenerate}
         onReset={handleReset}
         onImportJson={handleImportJson}
+        onOpenStaffModal={() => setIsStaffModalOpen(true)}
+        onOpenSettingsModal={() => setIsSettingsModalOpen(true)}
         violationCount={validation.violations.length}
         isGenerating={isGenerating}
       />
@@ -124,6 +148,22 @@ export function App() {
 
       {/* 下部: リアルタイム警告・違反ドロワー */}
       <ViolationPanel violations={validation.violations} />
+
+      {/* スタッフ管理モーダル */}
+      <StaffModal
+        isOpen={isStaffModalOpen}
+        onClose={() => setIsStaffModalOpen(false)}
+        staffList={plan.staffList}
+        onUpdateStaffList={handleUpdateStaffList}
+      />
+
+      {/* 条件・必要人員設定モーダル */}
+      <SettingsModal
+        isOpen={isSettingsModalOpen}
+        onClose={() => setIsSettingsModalOpen(false)}
+        rules={plan.rules}
+        onUpdateRules={handleUpdateRules}
+      />
     </div>
   );
 }

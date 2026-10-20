@@ -264,11 +264,11 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
               {/* 早番充足数 */}
               <tr className="bg-amber-50/50">
                 <td colSpan={3} className="sticky left-0 z-20 bg-amber-50/80 px-3 py-1 font-bold text-slate-700 border-r border-slate-200">
-                  早番 人数 (必要: 1)
+                  早番 人数 (必要: {plan.rules.defaultRequirements?.EARLY ?? 1})
                 </td>
                 {days.map((day) => {
                   const cov = validation.dailyCoverageSummary[day.date];
-                  const isDeficit = (cov?.actualEarly || 0) < 1;
+                  const isDeficit = (cov?.actualEarly || 0) < (plan.rules.defaultRequirements?.EARLY ?? 1);
                   return (
                     <td
                       key={`early_${day.date}`}
@@ -285,11 +285,11 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
               {/* 日勤充足数 */}
               <tr className="bg-blue-50/50">
                 <td colSpan={3} className="sticky left-0 z-20 bg-blue-50/80 px-3 py-1 font-bold text-slate-700 border-r border-slate-200">
-                  日勤 人数 (必要: 2)
+                  日勤 人数 (必要: {plan.rules.defaultRequirements?.DAY ?? 2})
                 </td>
                 {days.map((day) => {
                   const cov = validation.dailyCoverageSummary[day.date];
-                  const isDeficit = (cov?.actualDay || 0) < 2;
+                  const isDeficit = (cov?.actualDay || 0) < (plan.rules.defaultRequirements?.DAY ?? 2);
                   return (
                     <td
                       key={`day_${day.date}`}
@@ -306,11 +306,11 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
               {/* 遅番充足数 */}
               <tr className="bg-orange-50/50">
                 <td colSpan={3} className="sticky left-0 z-20 bg-orange-50/80 px-3 py-1 font-bold text-slate-700 border-r border-slate-200">
-                  遅番 人数 (必要: 1)
+                  遅番 人数 (必要: {plan.rules.defaultRequirements?.LATE ?? 1})
                 </td>
                 {days.map((day) => {
                   const cov = validation.dailyCoverageSummary[day.date];
-                  const isDeficit = (cov?.actualLate || 0) < 1;
+                  const isDeficit = (cov?.actualLate || 0) < (plan.rules.defaultRequirements?.LATE ?? 1);
                   return (
                     <td
                       key={`late_${day.date}`}
@@ -327,11 +327,11 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
               {/* 夜勤充足数 */}
               <tr className="bg-purple-50/50">
                 <td colSpan={3} className="sticky left-0 z-20 bg-purple-50/80 px-3 py-1 font-bold text-slate-700 border-r border-slate-200">
-                  夜勤 人数 (必要: 1)
+                  夜勤 人数 (必要: {plan.rules.defaultRequirements?.NIGHT ?? 1})
                 </td>
                 {days.map((day) => {
                   const cov = validation.dailyCoverageSummary[day.date];
-                  const isDeficit = (cov?.actualNight || 0) < 1;
+                  const isDeficit = (cov?.actualNight || 0) < (plan.rules.defaultRequirements?.NIGHT ?? 1);
                   return (
                     <td
                       key={`night_${day.date}`}

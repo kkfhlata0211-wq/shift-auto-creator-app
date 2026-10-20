@@ -135,8 +135,16 @@ export function generateAutomatedSchedule(
 
   // 4. 日中のシフト割当（早番・遅番・日勤・公休）
   days.forEach((day, dayIndex) => {
-    // この日に入れないといけない目標シフト枠
-    const neededShifts: ShiftTypeId[] = ['EARLY', 'DAY', 'DAY', 'LATE'];
+    // この日に入れないといけない目標シフト枠（設定値より構築）
+    const reqEarly = plan.rules.defaultRequirements?.EARLY ?? 1;
+    const reqDay = plan.rules.defaultRequirements?.DAY ?? 2;
+    const reqLate = plan.rules.defaultRequirements?.LATE ?? 1;
+
+    const neededShifts: ShiftTypeId[] = [
+      ...Array(reqEarly).fill('EARLY'),
+      ...Array(reqDay).fill('DAY'),
+      ...Array(reqLate).fill('LATE'),
+    ];
 
     // 既に割当済みのスタッフを除外
     const unassignedStaff = plan.staffList.filter((s) => {
