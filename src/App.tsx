@@ -8,27 +8,42 @@ import { MonthlySchedulePlan, ShiftTypeId, Staff, ConstraintRules, DayEvent } fr
 import { createInitialSchedule } from './mock/initialData';
 import { validateSchedule } from './engine/validator';
 import { generateAutomatedSchedule } from './engine/generator';
-import { loadPlanFromStorage, savePlanToStorage } from './utils/storage';
+import { loadPlansFromStorage, savePlansToStorage } from './utils/storage';
 
 export function App() {
-  const [plan, setPlan] = useState<MonthlySchedulePlan>(() => {
-    const saved = loadPlanFromStorage();
-    if (saved) {
-      // 既存データの正規化（公->休、時短->パートへの移行互換性）
+  const [scheduleState, setScheduleState] = useState(() => {
+    const savedPlans = loadPlansFromStorage();
+    const plans = Object.keys(savedPlans).length
+      ? savedPlans
+      : { '2026-11': createInitialSchedule('2026-11') };
+
+    Object.values(plans).forEach((saved) => {
       if (saved.shiftTypes?.HOLIDAY) {
         saved.shiftTypes.HOLIDAY.shortName = '休';
       }
       if (saved.staffList) {
-        saved.staffList = saved.staffList.map((s: any) => ({
-          ...s,
-          employmentType: s.employmentType === 'SHORT_TIME' ? 'PART_TIME' : s.employmentType,
-          weeklyMaxHours: s.employmentType === 'PART_TIME' ? (s.weeklyMaxHours || 40) : s.weeklyMaxHours,
+        saved.staffList = saved.staffList.map((staff) => ({
+          ...staff,
+          employmentType: (staff.employmentType as string) === 'SHORT_TIME' ? 'PART_TIME' : staff.employmentType,
+          weeklyMaxHours: staff.employmentType === 'PART_TIME' ? (staff.weeklyMaxHours || 40) : staff.weeklyMaxHours,
         }));
       }
-      return saved;
-    }
-    return createInitialSchedule('2026-11');
+    });
+
+    const selectedYearMonth = Object.keys(plans).sort().pop()!;
+    return { plans, selectedYearMonth };
   });
+  const plan = scheduleState.plans[scheduleState.selectedYearMonth];
+  const setPlan = (update: MonthlySchedulePlan | ((previous: MonthlySchedulePlan) => MonthlySchedulePlan)) => {
+    setScheduleState((previous) => {
+      const currentPlan = previous.plans[previous.selectedYearMonth];
+      const nextPlan = typeof update === 'function' ? update(currentPlan) : update;
+      return {
+        ...previous,
+        plans: { ...previous.plans, [nextPlan.yearMonth]: nextPlan },
+      };
+    });
+  };
 
   const [isGenerating, setIsGenerating] = useState(false);
   const [isStaffModalOpen, setIsStaffModalOpen] = useState(false);
@@ -36,8 +51,8 @@ export function App() {
 
   // 変更があるたびに LocalStorage に自動保存
   useEffect(() => {
-    savePlanToStorage(plan);
-  }, [plan]);
+    savePlansToStorage(scheduleState.plans);
+  }, [scheduleState.plans]);
 
   // リアルタイムに制約ルール違反・警告を再計算
   const validation = useMemo(() => {
@@ -146,6 +161,45 @@ export function App() {
     }));
   };
 
+  const handleChangeYearMonth = (yearMonth: string) => {
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(yearMonth)) return;
+
+    setScheduleState((previous) => {
+      if (previous.plans[yearMonth]) {
+        return { ...previous, selectedYearMonth: yearMonth };
+      }
+
+      const currentPlan = previous.plans[previous.selectedYearMonth];
+      const newPlan = {
+        ...createInitialSchedule(yearMonth),
+        name: `${yearMonth} シフト`,
+        targetMonthlyHours: currentPlan.targetMonthlyHours,
+        staffList: currentPlan.staffList.map((staff) => ({
+          ...staff,
+          ngStaffIds: [...staff.ngStaffIds],
+          preferredShiftTypes: staff.preferredShiftTypes ? [...staff.preferredShiftTypes] : undefined,
+          fixedDayShifts: staff.fixedDayShifts ? { ...staff.fixedDayShifts } : undefined,
+          allowedWeeklyWorkDays: staff.allowedWeeklyWorkDays ? [...staff.allowedWeeklyWorkDays] : undefined,
+        })),
+        shiftTypes: { ...currentPlan.shiftTypes },
+        assignments: {},
+        dailyRequirements: {},
+        requests: [],
+        events: {},
+        rules: {
+          ...currentPlan.rules,
+          defaultRequirements: { ...currentPlan.rules.defaultRequirements },
+        },
+        updatedAt: new Date().toISOString(),
+      };
+
+      return {
+        plans: { ...previous.plans, [yearMonth]: newPlan },
+        selectedYearMonth: yearMonth,
+      };
+    });
+  };
+
   // リセット
   const handleReset = () => {
     if (window.confirm('シフトの自動割当をクリアして初期状態に戻しますか？（確定ロックも解除されます）')) {
@@ -157,7 +211,10 @@ export function App() {
   // JSON復元
   const handleImportJson = (imported: MonthlySchedulePlan) => {
     if (imported && imported.staffList && imported.assignments) {
-      setPlan(imported);
+      setScheduleState((previous) => ({
+        plans: { ...previous.plans, [imported.yearMonth]: imported },
+        selectedYearMonth: imported.yearMonth,
+      }));
     } else {
       alert('無効なシフトデータファイルです。');
     }
@@ -174,6 +231,7 @@ export function App() {
         onOpenStaffModal={() => setIsStaffModalOpen(true)}
         onOpenSettingsModal={() => setIsSettingsModalOpen(true)}
         onUpdateTargetMonthlyHours={handleUpdateTargetMonthlyHours}
+        onChangeYearMonth={handleChangeYearMonth}
         violationCount={validation.violations.length}
         isGenerating={isGenerating}
       />

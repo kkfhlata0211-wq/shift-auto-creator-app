@@ -2,6 +2,7 @@ import { MonthlySchedulePlan } from '../types/shift';
 import { getDaysInMonth } from './dateUtils';
 
 const STORAGE_KEY = 'SHIFT_AUTO_CREATOR_PLAN_V1';
+const PLANS_STORAGE_KEY = 'SHIFT_AUTO_CREATOR_PLANS_V1';
 
 export function savePlanToStorage(plan: MonthlySchedulePlan): void {
   try {
@@ -19,6 +20,30 @@ export function loadPlanFromStorage(): MonthlySchedulePlan | null {
   } catch (error) {
     console.error('Failed to load plan from localStorage:', error);
     return null;
+  }
+}
+
+export function savePlansToStorage(plans: Record<string, MonthlySchedulePlan>): void {
+  try {
+    localStorage.setItem(PLANS_STORAGE_KEY, JSON.stringify(plans));
+  } catch (error) {
+    console.error('Failed to save plans to localStorage:', error);
+  }
+}
+
+export function loadPlansFromStorage(): Record<string, MonthlySchedulePlan> {
+  try {
+    const rawPlans = localStorage.getItem(PLANS_STORAGE_KEY);
+    if (rawPlans) {
+      const plans = JSON.parse(rawPlans) as Record<string, MonthlySchedulePlan>;
+      if (plans && typeof plans === 'object' && !Array.isArray(plans)) return plans;
+    }
+
+    const savedPlan = loadPlanFromStorage();
+    return savedPlan ? { [savedPlan.yearMonth]: savedPlan } : {};
+  } catch (error) {
+    console.error('Failed to load plans from localStorage:', error);
+    return {};
   }
 }
 

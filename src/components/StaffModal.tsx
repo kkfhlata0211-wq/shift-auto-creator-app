@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { X, UserPlus, Trash2, Edit2, Check, Moon, Star, Users, Calendar } from 'lucide-react';
 import { Staff, EmploymentType, ShiftTypeId } from '../types/shift';
 
@@ -17,6 +18,9 @@ export const StaffModal: React.FC<StaffModalProps> = ({
 }) => {
   const [editingStaffId, setEditingStaffId] = useState<string | null>(null);
   const [isAdding, setIsAdding] = useState(false);
+  const sortedStaffList = [...staffList].sort(
+    (first, second) => Number(first.employmentType === 'PART_TIME') - Number(second.employmentType === 'PART_TIME')
+  );
 
   // 編集/追加用フォーム状態
   const [formData, setFormData] = useState<Staff>({
@@ -133,8 +137,9 @@ export const StaffModal: React.FC<StaffModalProps> = ({
           </div>
 
           {/* 編集 / 追加 フォーム */}
-          {(isAdding || editingStaffId) && (
-            <div className="bg-blue-50/50 border border-blue-200 rounded-xl p-5 space-y-4">
+          {(isAdding || editingStaffId) && createPortal(
+            <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-xs p-4" role="dialog" aria-modal="true">
+              <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4 w-full max-w-4xl max-h-[90vh] overflow-y-auto shadow-2xl">
               <div className="flex items-center justify-between border-b border-blue-100 pb-2">
                 <h3 className="text-sm font-bold text-blue-900">
                   {isAdding ? '新規スタッフの登録' : `${formData.name} の設定編集`}
@@ -409,7 +414,9 @@ export const StaffModal: React.FC<StaffModalProps> = ({
                   </div>
                 </div>
               </div>
-            </div>
+              </div>
+            </div>,
+            document.body
           )}
 
           {/* スタッフ一覧テーブル */}
@@ -427,7 +434,7 @@ export const StaffModal: React.FC<StaffModalProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {staffList.map((staff) => {
+                {sortedStaffList.map((staff) => {
                   const ngNames = (staff.ngStaffIds || [])
                     .map((id) => staffList.find((s) => s.id === id)?.name)
                     .filter(Boolean);

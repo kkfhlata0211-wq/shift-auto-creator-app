@@ -20,6 +20,9 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
   onUpdateEvent,
 }) => {
   const days: CalendarDay[] = getDaysInMonth(plan.yearMonth);
+  const sortedStaffList = [...plan.staffList].sort(
+    (first, second) => Number(first.employmentType === 'PART_TIME') - Number(second.employmentType === 'PART_TIME')
+  );
 
   // ポップオーバーで選択中のセル
   const [activeCell, setActiveCell] = useState<{
@@ -249,7 +252,7 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
 
             {/* スタッフ行 */}
             <tbody>
-              {plan.staffList.map((staff) => {
+              {sortedStaffList.map((staff) => {
                 const hoursInfo = validation.staffHoursSummary[staff.id] || {
                   totalHours: 0,
                   maxHours: staff.monthlyMaxHours,

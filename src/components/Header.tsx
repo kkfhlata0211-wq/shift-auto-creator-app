@@ -11,6 +11,7 @@ interface HeaderProps {
   onOpenStaffModal: () => void;
   onOpenSettingsModal: () => void;
   onUpdateTargetMonthlyHours: (hours: number) => void;
+  onChangeYearMonth: (yearMonth: string) => void;
   violationCount: number;
   isGenerating?: boolean;
 }
@@ -23,6 +24,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenStaffModal,
   onOpenSettingsModal,
   onUpdateTargetMonthlyHours,
+  onChangeYearMonth,
   violationCount,
   isGenerating = false,
 }) => {
@@ -56,14 +58,20 @@ export const Header: React.FC<HeaderProps> = ({
           <div>
             <div className="flex items-center gap-3">
               <h1 className="text-xl font-bold text-slate-800 tracking-tight">
-                医療・介護 シフト自動作成
+                シフト自動作成
               </h1>
-              {/* 対象年月を大きく表示 */}
-              <div className="flex items-center gap-1.5 px-3 py-1 bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-600 rounded-xl shadow-xs">
-                <span className="text-[10px] font-bold text-blue-600 tracking-wider">対象年月</span>
-                <span className="text-xl font-black text-blue-900 tracking-tight">
-                  {plan.yearMonth.split('-')[0]}年{parseInt(plan.yearMonth.split('-')[1], 10)}月
-                </span>
+              <div className="flex items-center gap-2 px-3 py-1 bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-600 rounded-xl shadow-xs">
+                <label htmlFor="target-year-month" className="text-[10px] font-bold text-blue-600 tracking-wider whitespace-nowrap">
+                  対象年月
+                </label>
+                <input
+                  id="target-year-month"
+                  type="month"
+                  value={plan.yearMonth}
+                  onChange={(event) => onChangeYearMonth(event.target.value)}
+                  className="min-w-0 bg-transparent text-lg font-black text-blue-900 tracking-tight focus:outline-none focus:ring-2 focus:ring-blue-500 rounded"
+                  aria-label="対象年月を選択"
+                />
               </div>
             </div>
             <p className="text-xs text-slate-500 mt-1">
