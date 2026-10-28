@@ -129,7 +129,7 @@ export function validateSchedule(plan: MonthlySchedulePlan): ValidationSummary {
             staffName: staff.name,
             date: nextDay.date,
             ruleType: 'NIGHT_NEXT_AFTERMATH',
-            message: `明けの翌日は休日（休）である必要があります（現在: ${plan.shiftTypes[nextShiftId]?.name || nextShiftId}）`,
+            message: `明けの翌日は休（または希望有休）である必要があります（現在: ${plan.shiftTypes[nextShiftId]?.name || nextShiftId}）`,
           });
         }
       }

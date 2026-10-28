@@ -136,7 +136,19 @@ export function generateAutomatedSchedule(
 
           return true;
         })
-        .sort((a, b) => (staffNightCounts[a.id] || 0) - (staffNightCounts[b.id] || 0));
+        .sort((a, b) => {
+          // 明けの翌日（dayIndex + 2）に有休・休日の希望が入っているスタッフを優先
+          let bonusA = 0;
+          let bonusB = 0;
+          if (dayIndex < days.length - 2) {
+            const d2 = days[dayIndex + 2].date;
+            const reqA = plan.requests.find((r) => r.staffId === a.id && r.date === d2);
+            const reqB = plan.requests.find((r) => r.staffId === b.id && r.date === d2);
+            if (reqA?.requestedShiftId === 'PAID_LEAVE' || reqA?.requestedShiftId === 'HOLIDAY') bonusA += 20;
+            if (reqB?.requestedShiftId === 'PAID_LEAVE' || reqB?.requestedShiftId === 'HOLIDAY') bonusB += 20;
+          }
+          return ((staffNightCounts[a.id] || 0) - bonusA) - ((staffNightCounts[b.id] || 0) - bonusB);
+        });
 
       if (candidates.length > 0) {
         const selected = candidates[0];
@@ -169,11 +181,24 @@ export function generateAutomatedSchedule(
           }
         }
 
-        // 明けの次の日は休日（休）
+        // 明けの次の日は休（HOLIDAY）。有休（PAID_LEAVE）の希望がある場合はそちらを優先
         if (dayIndex < days.length - 2) {
           const dayAfterNext = days[dayIndex + 2];
           const dayAfterNextKey = `${selected.id}_${dayAfterNext.date}`;
-          if (!newAssignments[dayAfterNextKey]) {
+          const existingAssign = newAssignments[dayAfterNextKey];
+          const hasPaidLeaveReq = plan.requests.some(
+            (r) => r.staffId === selected.id && r.date === dayAfterNext.date && r.requestedShiftId === 'PAID_LEAVE'
+          );
+
+          if (hasPaidLeaveReq || existingAssign?.shiftTypeId === 'PAID_LEAVE') {
+            newAssignments[dayAfterNextKey] = {
+              staffId: selected.id,
+              date: dayAfterNext.date,
+              shiftTypeId: 'PAID_LEAVE',
+              isLocked: existingAssign?.isLocked || false,
+              isRequested: true,
+            };
+          } else if (!existingAssign) {
             newAssignments[dayAfterNextKey] = {
               staffId: selected.id,
               date: dayAfterNext.date,
@@ -307,10 +332,14 @@ export function generateAutomatedSchedule(
       const key = `${staff.id}_${day.date}`;
       const consec = getConsecutiveDaysBefore(staff.id, dayIndex);
 
-      // 前日が明番の場合、明けの次は必ず休
+      // 前日が明番の場合、明けの次は休（有休希望があれば有休優先）
       const prevDayWasNightNext =
         dayIndex > 0 &&
         newAssignments[`${staff.id}_${days[dayIndex - 1].date}`]?.shiftTypeId === 'NIGHT_NEXT';
+
+      const hasPaidLeaveReq = plan.requests.some(
+        (r) => r.staffId === staff.id && r.date === day.date && r.requestedShiftId === 'PAID_LEAVE'
+      );
 
       // 労働時間上限の判定
       const isPartTime = staff.employmentType === 'PART_TIME';
@@ -319,7 +348,7 @@ export function generateAutomatedSchedule(
       const weeklyOver = isPartTime && currentWeekHours + 8 > weeklyMax;
       const monthlyOver = !isPartTime && staff.monthlyMaxHours - staffWorkHours[staff.id] < 8;
 
-      // 休日を割り当てるべき条件
+      // 休日または有休を割り当てるべき条件
       if (
         prevDayWasNightNext ||
         weeklyOver ||
@@ -327,14 +356,21 @@ export function generateAutomatedSchedule(
         consec >= 3 ||
         staffHolidayCounts[staff.id] < staff.minHolidaysPerMonth
       ) {
+        const targetShift: ShiftTypeId =
+          prevDayWasNightNext && hasPaidLeaveReq ? 'PAID_LEAVE' : 'HOLIDAY';
+
         newAssignments[key] = {
           staffId: staff.id,
           date: day.date,
-          shiftTypeId: 'HOLIDAY',
+          shiftTypeId: targetShift,
           isLocked: false,
-          isRequested: false,
+          isRequested: hasPaidLeaveReq,
         };
-        staffHolidayCounts[staff.id] = (staffHolidayCounts[staff.id] || 0) + 1;
+        if (targetShift === 'HOLIDAY') {
+          staffHolidayCounts[staff.id] = (staffHolidayCounts[staff.id] || 0) + 1;
+        } else {
+          staffWorkHours[staff.id] += 8;
+        }
       } else {
         // 余力があるスタッフは日勤
         newAssignments[key] = {
