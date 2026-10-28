@@ -295,33 +295,51 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
                       </div>
                     </td>
 
-                    {/* 労働時間（月上限の表記を削除） */}
+                    {/* 労働時間 */}
                     <td
                       style={{ left: 260, width: 95 }}
                       className={`sticky left-[260px] z-20 bg-white hover:bg-slate-50 px-2 py-2 border-b border-r border-slate-200 text-center ${
-                        hoursInfo.isOver ? 'bg-rose-50' : ''
+                        hoursInfo.isOver || hoursInfo.targetHoursMismatch ? 'bg-amber-50/70' : ''
                       }`}
                     >
                       {staff.employmentType === 'PART_TIME' ? (
-                        <>
-                          <div
-                            className={`text-xs font-bold ${
-                              hoursInfo.isOver ? 'text-rose-600' : 'text-blue-700'
-                            }`}
-                          >
-                            最大 {hoursInfo.maxWeekHours}h/週
-                          </div>
-                          <div className="text-[10px] text-slate-400 font-medium">
-                            月計 {hoursInfo.totalHours}h
-                          </div>
-                        </>
+                        <div
+                          className={`text-xs font-bold ${
+                            hoursInfo.isOver ? 'text-rose-600' : 'text-blue-700'
+                          }`}
+                          title={`パート週最大実働: ${hoursInfo.maxWeekHours}h（週上限: ${staff.weeklyMaxHours || 40}h）`}
+                        >
+                          最大 {hoursInfo.maxWeekHours}h/週
+                        </div>
                       ) : (
                         <div
                           className={`text-xs font-bold ${
-                            hoursInfo.isOver ? 'text-rose-600' : 'text-slate-800'
+                            hoursInfo.targetHoursMismatch
+                              ? 'text-amber-600'
+                              : hoursInfo.isOver
+                              ? 'text-rose-600'
+                              : 'text-slate-800'
                           }`}
+                          title={
+                            plan.targetMonthlyHours
+                              ? `所定労働時間: ${plan.targetMonthlyHours}h ${
+                                  hoursInfo.targetHoursDiff !== undefined && hoursInfo.targetHoursDiff !== 0
+                                    ? `(差分: ${hoursInfo.targetHoursDiff > 0 ? '+' : ''}${hoursInfo.targetHoursDiff}h)`
+                                    : '（所定時間と合致OK）'
+                                }`
+                              : undefined
+                          }
                         >
-                          {hoursInfo.totalHours}h
+                          <span>{hoursInfo.totalHours}h</span>
+                          {plan.targetMonthlyHours &&
+                            hoursInfo.targetHoursDiff !== undefined &&
+                            hoursInfo.targetHoursDiff !== 0 && (
+                              <span className="text-[10px] ml-1 font-semibold text-amber-600 block">
+                                {hoursInfo.targetHoursDiff > 0
+                                  ? `+${hoursInfo.targetHoursDiff}h`
+                                  : `${hoursInfo.targetHoursDiff}h`}
+                              </span>
+                            )}
                         </div>
                       )}
                     </td>

@@ -207,6 +207,7 @@ export function createInitialSchedule(yearMonth: string = '2026-11'): MonthlySch
     id: `plan_${yearMonth}`,
     yearMonth,
     name: `${yearMonth} 介護病棟シフト`,
+    targetMonthlyHours: 168,
     staffList: INITIAL_STAFF,
     shiftTypes: DEFAULT_SHIFT_TYPES,
     assignments: {},

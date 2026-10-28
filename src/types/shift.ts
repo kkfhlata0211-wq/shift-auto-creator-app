@@ -36,6 +36,8 @@ export interface Staff {
   skillLevel: 1 | 2 | 3 | 4 | 5;    // スキル・役割（1〜5段階）
   ngStaffIds: string[];             // 同一シフト不可のスタッフID（NGペア）
   preferredShiftTypes?: ShiftTypeId[]; // 希望する勤務形態（任意）
+  fixedDayShifts?: Partial<Record<number, ShiftTypeId>>; // パート: 曜日固定シフト（0:日 〜 6:土）
+  allowedWeeklyWorkDays?: number[]; // パート: 週の勤務日数選択（複数可 例: [2, 3]日）
 }
 
 // 日付別イベント・注記
@@ -104,6 +106,9 @@ export interface RuleViolation {
     | 'SHORTAGE'                // 人員不足
     | 'EXCEED_MONTHLY_HOURS'    // 月間労働時間超過（正社員）
     | 'EXCEED_WEEKLY_HOURS'     // 週間労働時間超過（パート・最大40h）
+    | 'TARGET_HOURS_MISMATCH'   // 常勤の所定労働時間不一致
+    | 'FIXED_SHIFT_MISMATCH'    // パートの曜日固定シフト不一致
+    | 'WEEKLY_DAYS_MISMATCH'    // パートの週勤務日数不一致
     | 'INTERVAL_SHORTAGE'       // 勤務間インターバル不足
     | 'SKILL_DEFICIT';          // スキル不足
   message: string;
@@ -114,6 +119,7 @@ export interface MonthlySchedulePlan {
   id: string;
   yearMonth: string;                // 'YYYY-MM'
   name: string;                     // 例: '2026年11月 シフト案'
+  targetMonthlyHours?: number;      // 常勤の月の所定労働時間（例: 168h）
   staffList: Staff[];
   shiftTypes: Record<ShiftTypeId, ShiftType>;
   assignments: Record<string, ShiftAssignment>; // key: `${staffId}_${date}`

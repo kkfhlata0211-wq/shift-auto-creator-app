@@ -137,6 +137,15 @@ export function App() {
     });
   };
 
+  // 月の所定労働時間の更新
+  const handleUpdateTargetMonthlyHours = (hours: number) => {
+    setPlan((prev) => ({
+      ...prev,
+      targetMonthlyHours: hours,
+      updatedAt: new Date().toISOString(),
+    }));
+  };
+
   // リセット
   const handleReset = () => {
     if (window.confirm('シフトの自動割当をクリアして初期状態に戻しますか？（確定ロックも解除されます）')) {
@@ -164,6 +173,7 @@ export function App() {
         onImportJson={handleImportJson}
         onOpenStaffModal={() => setIsStaffModalOpen(true)}
         onOpenSettingsModal={() => setIsSettingsModalOpen(true)}
+        onUpdateTargetMonthlyHours={handleUpdateTargetMonthlyHours}
         violationCount={validation.violations.length}
         isGenerating={isGenerating}
       />

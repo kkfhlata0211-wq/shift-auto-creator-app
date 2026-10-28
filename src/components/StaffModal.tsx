@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { X, UserPlus, Trash2, Edit2, Check, Moon, Star, Users } from 'lucide-react';
-import { Staff, EmploymentType } from '../types/shift';
+import { X, UserPlus, Trash2, Edit2, Check, Moon, Star, Users, Calendar } from 'lucide-react';
+import { Staff, EmploymentType, ShiftTypeId } from '../types/shift';
 
 interface StaffModalProps {
   isOpen: boolean;
@@ -53,6 +53,8 @@ export const StaffModal: React.FC<StaffModalProps> = ({
       minHolidaysPerMonth: 9,
       skillLevel: 3,
       ngStaffIds: [],
+      fixedDayShifts: {},
+      allowedWeeklyWorkDays: [3, 4],
     });
   };
 
@@ -280,6 +282,101 @@ export const StaffModal: React.FC<StaffModalProps> = ({
                   </label>
                 </div>
 
+                {/* パート専用設定: 週勤務日数 & 曜日固定シフト */}
+                {formData.employmentType === 'PART_TIME' && (
+                  <>
+                    {/* 週の勤務日数（複数選択可） */}
+                    <div className="col-span-3 pt-3 border-t border-blue-100">
+                      <label className="block text-slate-700 font-semibold mb-1">
+                        週の希望勤務日数（複数選択可）
+                      </label>
+                      <div className="flex flex-wrap gap-2">
+                        {[1, 2, 3, 4, 5, 6].map((num) => {
+                          const isSelected = (formData.allowedWeeklyWorkDays || []).includes(num);
+                          return (
+                            <button
+                              key={num}
+                              type="button"
+                              onClick={() => {
+                                const current = formData.allowedWeeklyWorkDays || [];
+                                const updated = isSelected
+                                  ? current.filter((n) => n !== num)
+                                  : [...current, num].sort();
+                                setFormData({ ...formData, allowedWeeklyWorkDays: updated });
+                              }}
+                              className={`px-3 py-1.5 rounded-lg border text-xs font-bold transition-all ${
+                                isSelected
+                                  ? 'bg-blue-600 text-white border-blue-600 shadow-xs ring-1 ring-blue-400'
+                                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                              }`}
+                            >
+                              週{num}日
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <span className="text-[10px] text-slate-400 mt-1 block">
+                        ※ 複数選択可能です（例:「週3日」と「週4日」を選択した場合は週3〜4日勤務）
+                      </span>
+                    </div>
+
+                    {/* 曜日固定シフト設定 */}
+                    <div className="col-span-3 pt-2">
+                      <div className="flex items-center gap-1.5 mb-1.5 font-semibold text-slate-700">
+                        <Calendar className="w-3.5 h-3.5 text-blue-600" />
+                        <span>曜日固定シフト（パート専用）</span>
+                      </div>
+                      <div className="grid grid-cols-7 gap-2 bg-white p-3 rounded-xl border border-slate-200">
+                        {[
+                          { idx: 1, name: '月' },
+                          { idx: 2, name: '火' },
+                          { idx: 3, name: '水' },
+                          { idx: 4, name: '木' },
+                          { idx: 5, name: '金' },
+                          { idx: 6, name: '土', isSat: true },
+                          { idx: 0, name: '日', isSun: true },
+                        ].map((dow) => {
+                          const currentShift = formData.fixedDayShifts?.[dow.idx];
+                          return (
+                            <div key={dow.idx} className="bg-slate-50 p-2 rounded-lg border border-slate-200 text-center">
+                              <div
+                                className={`font-bold text-xs mb-1 ${
+                                  dow.isSun ? 'text-rose-600' : dow.isSat ? 'text-blue-600' : 'text-slate-700'
+                                }`}
+                              >
+                                {dow.name}曜日
+                              </div>
+                              <select
+                                value={currentShift || ''}
+                                onChange={(e) => {
+                                  const val = e.target.value as ShiftTypeId | '';
+                                  const updated = { ...(formData.fixedDayShifts || {}) };
+                                  if (val) {
+                                    updated[dow.idx] = val;
+                                  } else {
+                                    delete updated[dow.idx];
+                                  }
+                                  setFormData({ ...formData, fixedDayShifts: updated });
+                                }}
+                                className="w-full text-xs py-1 px-1 border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 font-semibold bg-white"
+                              >
+                                <option value="">指定なし</option>
+                                <option value="DAY">日勤</option>
+                                <option value="EARLY">早番</option>
+                                <option value="LATE">遅番</option>
+                                <option value="HOLIDAY">休 (固定)</option>
+                              </select>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <span className="text-[10px] text-slate-400 mt-1 block">
+                        ※ 曜日ごとに固定勤務または固定休日を設定できます。自動作成時も固定シフトが優先されます。
+                      </span>
+                    </div>
+                  </>
+                )}
+
                 {/* NGペア設定 */}
                 <div className="col-span-3 pt-2">
                   <label className="block text-slate-700 font-semibold mb-1">
@@ -364,7 +461,14 @@ export const StaffModal: React.FC<StaffModalProps> = ({
                       </td>
                       <td className="px-3 py-3 text-center font-medium text-slate-700">
                         {staff.employmentType === 'PART_TIME' ? (
-                          <span className="text-blue-700 font-bold">週 {staff.weeklyMaxHours ?? 40}h</span>
+                          <div>
+                            <span className="text-blue-700 font-bold">週 {staff.weeklyMaxHours ?? 40}h</span>
+                            {staff.allowedWeeklyWorkDays && staff.allowedWeeklyWorkDays.length > 0 && (
+                              <div className="text-[10px] text-blue-600 font-semibold mt-0.5">
+                                週{staff.allowedWeeklyWorkDays.sort().join('・')}日
+                              </div>
+                            )}
+                          </div>
                         ) : (
                           <span>月 {staff.monthlyMaxHours}h</span>
                         )}

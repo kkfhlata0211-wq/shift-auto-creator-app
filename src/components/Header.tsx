@@ -10,6 +10,7 @@ interface HeaderProps {
   onImportJson: (imported: MonthlySchedulePlan) => void;
   onOpenStaffModal: () => void;
   onOpenSettingsModal: () => void;
+  onUpdateTargetMonthlyHours: (hours: number) => void;
   violationCount: number;
   isGenerating?: boolean;
 }
@@ -21,6 +22,7 @@ export const Header: React.FC<HeaderProps> = ({
   onImportJson,
   onOpenStaffModal,
   onOpenSettingsModal,
+  onUpdateTargetMonthlyHours,
   violationCount,
   isGenerating = false,
 }) => {
@@ -52,16 +54,20 @@ export const Header: React.FC<HeaderProps> = ({
             <Sparkles className="w-6 h-6" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-3">
               <h1 className="text-xl font-bold text-slate-800 tracking-tight">
-                医療・介護 シフト自動作成マネージャー
+                医療・介護 シフト自動作成
               </h1>
-              <span className="px-2.5 py-0.5 text-xs font-semibold bg-blue-100 text-blue-700 rounded-full">
-                PC専用
-              </span>
+              {/* 対象年月を大きく表示 */}
+              <div className="flex items-center gap-1.5 px-3 py-1 bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-600 rounded-xl shadow-xs">
+                <span className="text-[10px] font-bold text-blue-600 tracking-wider">対象年月</span>
+                <span className="text-xl font-black text-blue-900 tracking-tight">
+                  {plan.yearMonth.split('-')[0]}年{parseInt(plan.yearMonth.split('-')[1], 10)}月
+                </span>
+              </div>
             </div>
-            <p className="text-xs text-slate-500 mt-0.5">
-              対象年月: <strong className="text-slate-700">{plan.yearMonth}</strong> ｜ スタッフ数: <strong className="text-slate-700">{plan.staffList.length}名</strong> ｜ 変形労働時間制・FTE対応
+            <p className="text-xs text-slate-500 mt-1">
+              スタッフ数: <strong className="text-slate-700">{plan.staffList.length}名</strong> ｜ 常勤所定労働時間・パート週管理・FTE対応
             </p>
           </div>
         </div>
@@ -97,6 +103,27 @@ export const Header: React.FC<HeaderProps> = ({
             <Sliders className="w-4 h-4 text-slate-600" />
             <span>条件・ルール</span>
           </button>
+
+          {/* 月の所定労働時間（常勤用）入力欄（自動作成ボタンの左に配置） */}
+          <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-blue-50/70 border border-blue-200 rounded-lg shadow-xs">
+            <div className="text-right">
+              <div className="text-[10px] font-bold text-blue-800 whitespace-nowrap leading-none">
+                常勤の月所定時間
+              </div>
+            </div>
+            <div className="flex items-center">
+              <input
+                type="number"
+                min={80}
+                max={240}
+                step={1}
+                value={plan.targetMonthlyHours ?? 168}
+                onChange={(e) => onUpdateTargetMonthlyHours(Number(e.target.value))}
+                className="w-14 px-1 py-0.5 text-center font-black text-sm text-blue-900 bg-white border border-blue-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <span className="text-xs font-bold text-blue-800 ml-1">h</span>
+            </div>
+          </div>
 
           {/* 自動作成ボタン */}
           <button

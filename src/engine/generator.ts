@@ -35,9 +35,29 @@ export function generateAutomatedSchedule(
     }
   });
 
+  // 2.5 パートの曜日固定シフトの反映（希望休・ロックがない場合）
+  plan.staffList.forEach((staff) => {
+    if (staff.employmentType === 'PART_TIME' && staff.fixedDayShifts) {
+      days.forEach((day) => {
+        const fixedShiftId = staff.fixedDayShifts![day.dayOfWeekIndex];
+        const key = `${staff.id}_${day.date}`;
+        if (fixedShiftId && !newAssignments[key]) {
+          newAssignments[key] = {
+            staffId: staff.id,
+            date: day.date,
+            shiftTypeId: fixedShiftId,
+            isLocked: false,
+            isRequested: false,
+          };
+        }
+      });
+    }
+  });
+
   // スタッフ毎のカウンター初期化
   const staffWorkHours: Record<string, number> = {};
   const staffWeeklyWorkHours: Record<string, Record<number, number>> = {};
+  const staffWeeklyWorkDaysCount: Record<string, Record<number, number>> = {};
   const staffNightCounts: Record<string, number> = {};
   const staffWeekendCounts: Record<string, number> = {};
   const staffHolidayCounts: Record<string, number> = {};
@@ -45,12 +65,13 @@ export function generateAutomatedSchedule(
   plan.staffList.forEach((s) => {
     staffWorkHours[s.id] = 0;
     staffWeeklyWorkHours[s.id] = {};
+    staffWeeklyWorkDaysCount[s.id] = {};
     staffNightCounts[s.id] = 0;
     staffWeekendCounts[s.id] = 0;
     staffHolidayCounts[s.id] = 0;
   });
 
-  // 初期リクエスト・ロック済みセルの労働時間を積算
+  // 初期リクエスト・固定・ロック済みセルの労働時間を積算
   Object.values(newAssignments).forEach((assign) => {
     const shift = plan.shiftTypes[assign.shiftTypeId];
     if (shift?.isWork) {
@@ -60,6 +81,9 @@ export function generateAutomatedSchedule(
         const wIdx = day.weekIndex;
         if (!staffWeeklyWorkHours[assign.staffId]) staffWeeklyWorkHours[assign.staffId] = {};
         staffWeeklyWorkHours[assign.staffId][wIdx] = (staffWeeklyWorkHours[assign.staffId][wIdx] || 0) + shift.workHours;
+
+        if (!staffWeeklyWorkDaysCount[assign.staffId]) staffWeeklyWorkDaysCount[assign.staffId] = {};
+        staffWeeklyWorkDaysCount[assign.staffId][wIdx] = (staffWeeklyWorkDaysCount[assign.staffId][wIdx] || 0) + 1;
       }
     }
   });
@@ -252,19 +276,40 @@ export function generateAutomatedSchedule(
       }
       score -= consec * 20;
 
-      // パート: 週単位（最大40h）のチェック
-      // 正社員: 月単位の契約上限時間のチェック
+      // パート: 週単位（最大40h）および週の勤務日数制限チェック
+      // 正社員: 月単位の契約上限時間および所定労働時間のチェック
       if (staff.employmentType === 'PART_TIME') {
         const weekMax = staff.weeklyMaxHours || 40;
         const currentWeekHours = staffWeeklyWorkHours[staff.id]?.[day.weekIndex] || 0;
         if (currentWeekHours + 8 > weekMax) {
           return -9999;
         }
+
+        // 週の勤務日数（複数選択可）の上限チェック
+        if (staff.allowedWeeklyWorkDays && staff.allowedWeeklyWorkDays.length > 0) {
+          const maxAllowedDays = Math.max(...staff.allowedWeeklyWorkDays);
+          const currentDays = staffWeeklyWorkDaysCount[staff.id]?.[day.weekIndex] || 0;
+          if (currentDays >= maxAllowedDays) {
+            return -9999;
+          }
+        }
+
         score += (weekMax - currentWeekHours) * 2;
       } else {
         const hoursRemaining = staff.monthlyMaxHours - staffWorkHours[staff.id];
         if (hoursRemaining < 8) return -9999;
-        score += hoursRemaining;
+
+        // 所定労働時間（targetMonthlyHours）への収束スコアリング
+        if (plan.targetMonthlyHours && plan.targetMonthlyHours > 0) {
+          const diff = plan.targetMonthlyHours - staffWorkHours[staff.id];
+          if (diff <= 0) {
+            score -= 150; // 所定時間を満たしている場合は優先度を下げる
+          } else {
+            score += diff * 3; // 所定時間に未達のスタッフを強く優先
+          }
+        } else {
+          score += hoursRemaining;
+        }
       }
 
       // 土日の出勤平準化
@@ -319,6 +364,10 @@ export function generateAutomatedSchedule(
         staffWeeklyWorkHours[chosen.id][day.weekIndex] =
           (staffWeeklyWorkHours[chosen.id][day.weekIndex] || 0) + 8;
 
+        if (!staffWeeklyWorkDaysCount[chosen.id]) staffWeeklyWorkDaysCount[chosen.id] = {};
+        staffWeeklyWorkDaysCount[chosen.id][day.weekIndex] =
+          (staffWeeklyWorkDaysCount[chosen.id][day.weekIndex] || 0) + 1;
+
         if (day.isWeekend) staffWeekendCounts[chosen.id] = (staffWeekendCounts[chosen.id] || 0) + 1;
 
         // unassignedStaff から除外
@@ -348,10 +397,18 @@ export function generateAutomatedSchedule(
       const weeklyOver = isPartTime && currentWeekHours + 8 > weeklyMax;
       const monthlyOver = !isPartTime && staff.monthlyMaxHours - staffWorkHours[staff.id] < 8;
 
+      // パートの週日数上限
+      const maxAllowedDays = isPartTime && staff.allowedWeeklyWorkDays?.length
+        ? Math.max(...staff.allowedWeeklyWorkDays)
+        : 99;
+      const daysCount = isPartTime ? (staffWeeklyWorkDaysCount[staff.id]?.[day.weekIndex] || 0) : 0;
+      const weeklyDaysFull = isPartTime && daysCount >= maxAllowedDays;
+
       // 休日または有休を割り当てるべき条件
       if (
         prevDayWasNightNext ||
         weeklyOver ||
+        weeklyDaysFull ||
         monthlyOver ||
         consec >= 3 ||
         staffHolidayCounts[staff.id] < staff.minHolidaysPerMonth
@@ -384,6 +441,10 @@ export function generateAutomatedSchedule(
         if (!staffWeeklyWorkHours[staff.id]) staffWeeklyWorkHours[staff.id] = {};
         staffWeeklyWorkHours[staff.id][day.weekIndex] =
           (staffWeeklyWorkHours[staff.id][day.weekIndex] || 0) + 8;
+
+        if (!staffWeeklyWorkDaysCount[staff.id]) staffWeeklyWorkDaysCount[staff.id] = {};
+        staffWeeklyWorkDaysCount[staff.id][day.weekIndex] =
+          (staffWeeklyWorkDaysCount[staff.id][day.weekIndex] || 0) + 1;
 
         if (day.isWeekend) staffWeekendCounts[staff.id] = (staffWeekendCounts[staff.id] || 0) + 1;
       }
