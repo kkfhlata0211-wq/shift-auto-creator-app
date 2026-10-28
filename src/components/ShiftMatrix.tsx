@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { Lock, Unlock, Moon, Star, Calendar } from 'lucide-react';
-import { MonthlySchedulePlan, ShiftTypeId } from '../types/shift';
+import { Lock, Unlock, Moon, Star, Calendar, Plus, Trash2, Check, X } from 'lucide-react';
+import { MonthlySchedulePlan, ShiftTypeId, DayEvent } from '../types/shift';
 import { getDaysInMonth, CalendarDay } from '../utils/dateUtils';
 import { ValidationSummary } from '../engine/validator';
 
@@ -9,6 +9,7 @@ interface ShiftMatrixProps {
   validation: ValidationSummary;
   onUpdateAssignment: (staffId: string, date: string, shiftTypeId: ShiftTypeId, isLocked?: boolean) => void;
   onToggleLock: (staffId: string, date: string) => void;
+  onUpdateEvent?: (date: string, event: DayEvent | null) => void;
 }
 
 export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
@@ -16,6 +17,7 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
   validation,
   onUpdateAssignment,
   onToggleLock,
+  onUpdateEvent,
 }) => {
   const days: CalendarDay[] = getDaysInMonth(plan.yearMonth);
 
@@ -24,6 +26,58 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
     staffId: string;
     date: string;
   } | null>(null);
+
+  // 行事・イベント編集中の日付
+  const [editingEventDate, setEditingEventDate] = useState<string | null>(null);
+  const [eventForm, setEventForm] = useState<{ title: string; notes: string; color: string }>({
+    title: '',
+    notes: '',
+    color: 'bg-indigo-100 text-indigo-800 border-indigo-200',
+  });
+
+  const handleOpenEventEditor = (date: string) => {
+    const existing = plan.events[date];
+    if (existing) {
+      setEventForm({
+        title: existing.title,
+        notes: existing.notes || '',
+        color: existing.color || 'bg-indigo-100 text-indigo-800 border-indigo-200',
+      });
+    } else {
+      setEventForm({
+        title: '',
+        notes: '',
+        color: 'bg-indigo-100 text-indigo-800 border-indigo-200',
+      });
+    }
+    setEditingEventDate(date);
+  };
+
+  const handleSaveEvent = () => {
+    if (!editingEventDate) return;
+    if (!eventForm.title.trim()) {
+      // タイトル空欄の場合はイベント削除
+      if (onUpdateEvent) onUpdateEvent(editingEventDate, null);
+    } else {
+      if (onUpdateEvent) {
+        onUpdateEvent(editingEventDate, {
+          date: editingEventDate,
+          title: eventForm.title.trim(),
+          notes: eventForm.notes.trim() || undefined,
+          color: eventForm.color,
+        });
+      }
+    }
+    setEditingEventDate(null);
+  };
+
+  const handleDeleteEvent = () => {
+    if (!editingEventDate) return;
+    if (onUpdateEvent) {
+      onUpdateEvent(editingEventDate, null);
+    }
+    setEditingEventDate(null);
+  };
 
   const getShiftBadge = (shiftId?: ShiftTypeId, isLocked: boolean = false) => {
     if (!shiftId) {
@@ -85,52 +139,37 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
       {/* スクロール可能なマトリクスグリッド */}
       <div className="flex-1 overflow-auto p-4">
         <div className="inline-block min-w-full align-middle bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-          <table className="min-w-full border-collapse text-left text-xs">
-            {/* カレンダーヘッダー */}
-            <thead>
-              {/* イベント行 */}
-              <tr className="bg-slate-50 border-b border-slate-200">
-                <th
-                  colSpan={3}
-                  className="sticky left-0 z-30 bg-slate-50 px-3 py-1.5 font-bold text-slate-700 border-r border-slate-200"
-                >
-                  <div className="flex items-center gap-1 text-slate-600">
-                    <Calendar className="w-3.5 h-3.5" />
-                    <span>行事・イベント</span>
-                  </div>
-                </th>
-                {days.map((day) => {
-                  const event = plan.events[day.date];
-                  return (
-                    <th
-                      key={`event_${day.date}`}
-                      className="px-1 py-1 text-center font-normal border-r border-slate-100 min-w-[38px] max-w-[38px]"
-                      title={event ? `${event.title}: ${event.notes || ''}` : undefined}
-                    >
-                      {event ? (
-                        <div
-                          className={`text-[10px] leading-tight px-1 py-0.5 rounded truncate font-medium cursor-help ${
-                            event.color || 'bg-blue-100 text-blue-700'
-                          }`}
-                        >
-                          {event.title.slice(0, 3)}
-                        </div>
-                      ) : null}
-                    </th>
-                  );
-                })}
-              </tr>
+          <table className="border-separate border-spacing-0 text-left text-xs table-fixed">
+            {/* カラム幅をブラウザの拡大縮小時もピクセル単位で厳格固定 */}
+            <colgroup>
+              <col style={{ width: 150, minWidth: 150, maxWidth: 150 }} />
+              <col style={{ width: 110, minWidth: 110, maxWidth: 110 }} />
+              <col style={{ width: 95, minWidth: 95, maxWidth: 95 }} />
+              {days.map((day) => (
+                <col key={day.date} style={{ width: 42, minWidth: 42, maxWidth: 42 }} />
+              ))}
+            </colgroup>
 
-              {/* 日付・曜日行 */}
-              <tr className="bg-slate-100 border-b border-slate-200">
-                <th className="sticky left-0 z-30 bg-slate-100 px-3 py-2 font-bold text-slate-700 w-36 border-r border-slate-200">
+            <thead>
+              {/* 1段目: 日付・曜日行 */}
+              <tr className="bg-slate-100">
+                <th
+                  style={{ left: 0, width: 150 }}
+                  className="sticky left-0 z-30 bg-slate-100 px-3 py-2 font-bold text-slate-700 border-b border-r border-slate-200"
+                >
                   スタッフ氏名
                 </th>
-                <th className="sticky left-36 z-30 bg-slate-100 px-2 py-2 font-bold text-slate-700 w-24 border-r border-slate-200 text-center">
+                <th
+                  style={{ left: 150, width: 110 }}
+                  className="sticky left-[150px] z-30 bg-slate-100 px-2 py-2 font-bold text-slate-700 border-b border-r border-slate-200 text-center"
+                >
                   職種 / スキル
                 </th>
-                <th className="sticky left-60 z-30 bg-slate-100 px-2 py-2 font-bold text-slate-700 w-28 border-r border-slate-200 text-center">
-                  労働時間 / 上限
+                <th
+                  style={{ left: 260, width: 95 }}
+                  className="sticky left-[260px] z-30 bg-slate-100 px-2 py-2 font-bold text-slate-700 border-b border-r border-slate-200 text-center"
+                >
+                  労働時間
                 </th>
                 {days.map((day) => {
                   const isSun = day.isSunday;
@@ -139,12 +178,13 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
                     ? 'text-rose-600 bg-rose-50'
                     : isSat
                     ? 'text-blue-600 bg-blue-50'
-                    : 'text-slate-700';
+                    : 'text-slate-700 bg-slate-100';
 
                   return (
                     <th
                       key={day.date}
-                      className={`px-1 py-1.5 text-center border-r border-slate-200 min-w-[38px] max-w-[38px] ${dayColor}`}
+                      style={{ width: 42 }}
+                      className={`px-1 py-1.5 text-center border-b border-r border-slate-200 ${dayColor}`}
                     >
                       <div className="font-bold text-sm leading-none">{day.dayNumber}</div>
                       <div className="text-[10px] font-semibold mt-0.5">({day.dayOfWeek})</div>
@@ -152,21 +192,79 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
                   );
                 })}
               </tr>
+
+              {/* 2段目: 行事・イベント行（日付の下に配置＆編集可能） */}
+              <tr className="bg-slate-50">
+                <th
+                  style={{ left: 0, width: 150 }}
+                  className="sticky left-0 z-30 bg-slate-50 px-3 py-1 font-bold text-slate-600 border-b border-r border-slate-200"
+                >
+                  <div className="flex items-center gap-1.5">
+                    <Calendar className="w-3.5 h-3.5 text-blue-600" />
+                    <span>行事・イベント</span>
+                  </div>
+                </th>
+                <th
+                  style={{ left: 150, width: 110 }}
+                  className="sticky left-[150px] z-30 bg-slate-50 border-b border-r border-slate-200"
+                />
+                <th
+                  style={{ left: 260, width: 95 }}
+                  className="sticky left-[260px] z-30 bg-slate-50 border-b border-r border-slate-200 text-center text-[10px] text-slate-400 font-normal"
+                >
+                  クリック編集
+                </th>
+                {days.map((day) => {
+                  const event = plan.events[day.date];
+                  return (
+                    <th
+                      key={`event_${day.date}`}
+                      style={{ width: 42 }}
+                      onClick={() => handleOpenEventEditor(day.date)}
+                      className="px-0.5 py-1 text-center font-normal border-b border-r border-slate-200 hover:bg-blue-50 cursor-pointer transition-colors group select-none relative"
+                      title={
+                        event
+                          ? `${event.title}${event.notes ? ` (${event.notes})` : ''}\nクリックして編集`
+                          : `${day.dayNumber}日の行事・メモを追加`
+                      }
+                    >
+                      {event ? (
+                        <div
+                          className={`text-[10px] leading-tight px-1 py-0.5 rounded truncate font-bold shadow-xs border ${
+                            event.color || 'bg-blue-100 text-blue-800 border-blue-200'
+                          }`}
+                        >
+                          {event.title.slice(0, 3)}
+                        </div>
+                      ) : (
+                        <div className="h-5 flex items-center justify-center text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Plus className="w-3.5 h-3.5 text-blue-500" />
+                        </div>
+                      )}
+                    </th>
+                  );
+                })}
+              </tr>
             </thead>
 
             {/* スタッフ行 */}
-            <tbody className="divide-y divide-slate-100">
+            <tbody>
               {plan.staffList.map((staff) => {
                 const hoursInfo = validation.staffHoursSummary[staff.id] || {
                   totalHours: 0,
                   maxHours: staff.monthlyMaxHours,
                   isOver: false,
+                  maxWeekHours: 0,
+                  isWeeklyOver: false,
                 };
 
                 return (
                   <tr key={staff.id} className="hover:bg-slate-50 transition-colors">
                     {/* スタッフ名 */}
-                    <td className="sticky left-0 z-20 bg-white hover:bg-slate-50 px-3 py-2 border-r border-slate-200">
+                    <td
+                      style={{ left: 0, width: 150 }}
+                      className="sticky left-0 z-20 bg-white hover:bg-slate-50 px-3 py-2 border-b border-r border-slate-200"
+                    >
                       <div className="flex items-center justify-between">
                         <div>
                           <div className="font-semibold text-slate-800 flex items-center gap-1.5">
@@ -178,14 +276,17 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
                             )}
                           </div>
                           <div className="text-[10px] text-slate-400">
-                            {staff.employmentType === 'FULL_TIME' ? '常勤' : 'パート'}
+                            {staff.employmentType === 'FULL_TIME' ? '正社員' : 'パート'}
                           </div>
                         </div>
                       </div>
                     </td>
 
                     {/* 役職・スキル */}
-                    <td className="sticky left-36 z-20 bg-white hover:bg-slate-50 px-2 py-2 border-r border-slate-200 text-center">
+                    <td
+                      style={{ left: 150, width: 110 }}
+                      className="sticky left-[150px] z-20 bg-white hover:bg-slate-50 px-2 py-2 border-b border-r border-slate-200 text-center"
+                    >
                       <div className="text-[11px] font-medium text-slate-700">{staff.role}</div>
                       <div className="flex items-center justify-center gap-0.5 mt-0.5" title={`スキル評価: ${staff.skillLevel}/5`}>
                         {Array.from({ length: staff.skillLevel }).map((_, i) => (
@@ -194,9 +295,10 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
                       </div>
                     </td>
 
-                    {/* 労働時間 */}
+                    {/* 労働時間（月上限の表記を削除） */}
                     <td
-                      className={`sticky left-60 z-20 bg-white hover:bg-slate-50 px-2 py-2 border-r border-slate-200 text-center ${
+                      style={{ left: 260, width: 95 }}
+                      className={`sticky left-[260px] z-20 bg-white hover:bg-slate-50 px-2 py-2 border-b border-r border-slate-200 text-center ${
                         hoursInfo.isOver ? 'bg-rose-50' : ''
                       }`}
                     >
@@ -209,21 +311,18 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
                           >
                             最大 {hoursInfo.maxWeekHours}h/週
                           </div>
-                          <div className="text-[9px] text-slate-400">
-                            週上限{staff.weeklyMaxHours || 40}h (月{hoursInfo.totalHours}h)
+                          <div className="text-[10px] text-slate-400 font-medium">
+                            月計 {hoursInfo.totalHours}h
                           </div>
                         </>
                       ) : (
-                        <>
-                          <div
-                            className={`text-xs font-bold ${
-                              hoursInfo.isOver ? 'text-rose-600' : 'text-slate-700'
-                            }`}
-                          >
-                            {hoursInfo.totalHours}h
-                          </div>
-                          <div className="text-[10px] text-slate-400">/ 上限{staff.monthlyMaxHours}h</div>
-                        </>
+                        <div
+                          className={`text-xs font-bold ${
+                            hoursInfo.isOver ? 'text-rose-600' : 'text-slate-800'
+                          }`}
+                        >
+                          {hoursInfo.totalHours}h
+                        </div>
                       )}
                     </td>
 
@@ -240,8 +339,9 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
                       return (
                         <td
                           key={day.date}
+                          style={{ width: 42 }}
                           onClick={() => setActiveCell({ staffId: staff.id, date: day.date })}
-                          className={`relative p-1 text-center border-r border-slate-100 cursor-pointer select-none group min-w-[38px] max-w-[38px] ${
+                          className={`relative p-1 text-center border-b border-r border-slate-200 cursor-pointer select-none group ${
                             isLocked ? 'bg-amber-50/50' : ''
                           } ${
                             hasViolation ? 'bg-rose-50 ring-1 ring-inset ring-rose-300' : ''
@@ -290,16 +390,28 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
             <tfoot className="border-t-2 border-slate-300 font-medium">
               {/* 早番充足数 */}
               <tr className="bg-amber-50/50">
-                <td colSpan={3} className="sticky left-0 z-20 bg-amber-50/80 px-3 py-1 font-bold text-slate-700 border-r border-slate-200">
+                <td
+                  style={{ left: 0, width: 150 }}
+                  className="sticky left-0 z-20 bg-amber-50/90 px-3 py-1 font-bold text-slate-700 border-b border-r border-slate-200"
+                >
                   早番 人数 (必要: {plan.rules.defaultRequirements?.EARLY ?? 1})
                 </td>
+                <td
+                  style={{ left: 150, width: 110 }}
+                  className="sticky left-[150px] z-20 bg-amber-50/90 border-b border-r border-slate-200"
+                />
+                <td
+                  style={{ left: 260, width: 95 }}
+                  className="sticky left-[260px] z-20 bg-amber-50/90 border-b border-r border-slate-200"
+                />
                 {days.map((day) => {
                   const cov = validation.dailyCoverageSummary[day.date];
                   const isDeficit = (cov?.actualEarly || 0) < (plan.rules.defaultRequirements?.EARLY ?? 1);
                   return (
                     <td
                       key={`early_${day.date}`}
-                      className={`text-center font-bold text-xs py-1 border-r border-slate-200 ${
+                      style={{ width: 42 }}
+                      className={`text-center font-bold text-xs py-1 border-b border-r border-slate-200 ${
                         isDeficit ? 'bg-rose-200 text-rose-800' : 'text-slate-700'
                       }`}
                     >
@@ -311,16 +423,28 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
 
               {/* 日勤充足数 */}
               <tr className="bg-blue-50/50">
-                <td colSpan={3} className="sticky left-0 z-20 bg-blue-50/80 px-3 py-1 font-bold text-slate-700 border-r border-slate-200">
+                <td
+                  style={{ left: 0, width: 150 }}
+                  className="sticky left-0 z-20 bg-blue-50/90 px-3 py-1 font-bold text-slate-700 border-b border-r border-slate-200"
+                >
                   日勤 人数 (必要: {plan.rules.defaultRequirements?.DAY ?? 2})
                 </td>
+                <td
+                  style={{ left: 150, width: 110 }}
+                  className="sticky left-[150px] z-20 bg-blue-50/90 border-b border-r border-slate-200"
+                />
+                <td
+                  style={{ left: 260, width: 95 }}
+                  className="sticky left-[260px] z-20 bg-blue-50/90 border-b border-r border-slate-200"
+                />
                 {days.map((day) => {
                   const cov = validation.dailyCoverageSummary[day.date];
                   const isDeficit = (cov?.actualDay || 0) < (plan.rules.defaultRequirements?.DAY ?? 2);
                   return (
                     <td
                       key={`day_${day.date}`}
-                      className={`text-center font-bold text-xs py-1 border-r border-slate-200 ${
+                      style={{ width: 42 }}
+                      className={`text-center font-bold text-xs py-1 border-b border-r border-slate-200 ${
                         isDeficit ? 'bg-rose-200 text-rose-800' : 'text-slate-700'
                       }`}
                     >
@@ -332,16 +456,28 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
 
               {/* 遅番充足数 */}
               <tr className="bg-orange-50/50">
-                <td colSpan={3} className="sticky left-0 z-20 bg-orange-50/80 px-3 py-1 font-bold text-slate-700 border-r border-slate-200">
+                <td
+                  style={{ left: 0, width: 150 }}
+                  className="sticky left-0 z-20 bg-orange-50/90 px-3 py-1 font-bold text-slate-700 border-b border-r border-slate-200"
+                >
                   遅番 人数 (必要: {plan.rules.defaultRequirements?.LATE ?? 1})
                 </td>
+                <td
+                  style={{ left: 150, width: 110 }}
+                  className="sticky left-[150px] z-20 bg-orange-50/90 border-b border-r border-slate-200"
+                />
+                <td
+                  style={{ left: 260, width: 95 }}
+                  className="sticky left-[260px] z-20 bg-orange-50/90 border-b border-r border-slate-200"
+                />
                 {days.map((day) => {
                   const cov = validation.dailyCoverageSummary[day.date];
                   const isDeficit = (cov?.actualLate || 0) < (plan.rules.defaultRequirements?.LATE ?? 1);
                   return (
                     <td
                       key={`late_${day.date}`}
-                      className={`text-center font-bold text-xs py-1 border-r border-slate-200 ${
+                      style={{ width: 42 }}
+                      className={`text-center font-bold text-xs py-1 border-b border-r border-slate-200 ${
                         isDeficit ? 'bg-rose-200 text-rose-800' : 'text-slate-700'
                       }`}
                     >
@@ -353,16 +489,28 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
 
               {/* 夜勤充足数 */}
               <tr className="bg-purple-50/50">
-                <td colSpan={3} className="sticky left-0 z-20 bg-purple-50/80 px-3 py-1 font-bold text-slate-700 border-r border-slate-200">
+                <td
+                  style={{ left: 0, width: 150 }}
+                  className="sticky left-0 z-20 bg-purple-50/90 px-3 py-1 font-bold text-slate-700 border-b border-r border-slate-200"
+                >
                   夜勤 人数 (必要: {plan.rules.defaultRequirements?.NIGHT ?? 1})
                 </td>
+                <td
+                  style={{ left: 150, width: 110 }}
+                  className="sticky left-[150px] z-20 bg-purple-50/90 border-b border-r border-slate-200"
+                />
+                <td
+                  style={{ left: 260, width: 95 }}
+                  className="sticky left-[260px] z-20 bg-purple-50/90 border-b border-r border-slate-200"
+                />
                 {days.map((day) => {
                   const cov = validation.dailyCoverageSummary[day.date];
                   const isDeficit = (cov?.actualNight || 0) < (plan.rules.defaultRequirements?.NIGHT ?? 1);
                   return (
                     <td
                       key={`night_${day.date}`}
-                      className={`text-center font-bold text-xs py-1 border-r border-slate-200 ${
+                      style={{ width: 42 }}
+                      className={`text-center font-bold text-xs py-1 border-b border-r border-slate-200 ${
                         isDeficit ? 'bg-rose-200 text-rose-800' : 'text-slate-700'
                       }`}
                     >
@@ -374,16 +522,28 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
 
               {/* 総合充足判定ハイライト */}
               <tr className="bg-slate-100">
-                <td colSpan={3} className="sticky left-0 z-20 bg-slate-100 px-3 py-1.5 font-bold text-slate-800 border-r border-slate-200">
+                <td
+                  style={{ left: 0, width: 150 }}
+                  className="sticky left-0 z-20 bg-slate-100 px-3 py-1.5 font-bold text-slate-800 border-b border-r border-slate-200"
+                >
                   人員充足判定 (FTE基準)
                 </td>
+                <td
+                  style={{ left: 150, width: 110 }}
+                  className="sticky left-[150px] z-20 bg-slate-100 border-b border-r border-slate-200"
+                />
+                <td
+                  style={{ left: 260, width: 95 }}
+                  className="sticky left-[260px] z-20 bg-slate-100 border-b border-r border-slate-200"
+                />
                 {days.map((day) => {
                   const cov = validation.dailyCoverageSummary[day.date];
                   const isDeficit = cov?.isDeficit;
                   return (
                     <td
                       key={`status_${day.date}`}
-                      className={`text-center text-[10px] font-bold py-1 border-r border-slate-200 ${
+                      style={{ width: 42 }}
+                      className={`text-center text-[10px] font-bold py-1 border-b border-r border-slate-200 ${
                         isDeficit ? 'bg-rose-500 text-white animate-pulse' : 'bg-emerald-50 text-emerald-700'
                       }`}
                     >
@@ -450,6 +610,117 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
                   <span>{st.name}</span>
                 </button>
               ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 行事・イベント編集ポップオーバー */}
+      {editingEventDate && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-xs p-4"
+          onClick={() => setEditingEventDate(null)}
+        >
+          <div
+            className="bg-white rounded-xl shadow-2xl border border-slate-200 p-5 w-80 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b pb-2">
+              <div className="flex items-center gap-1.5 font-bold text-sm text-slate-800">
+                <Calendar className="w-4 h-4 text-blue-600" />
+                <span>{editingEventDate} の行事・イベント</span>
+              </div>
+              <button
+                onClick={() => setEditingEventDate(null)}
+                className="text-slate-400 hover:text-slate-600 p-1"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  行事・イベント名
+                </label>
+                <input
+                  type="text"
+                  placeholder="例: 定期健康診断, 入浴日, 研修"
+                  value={eventForm.title}
+                  onChange={(e) => setEventForm({ ...eventForm, title: e.target.value })}
+                  className="w-full px-3 py-2 border rounded-lg border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+                  autoFocus
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  備考・時間帯（任意）
+                </label>
+                <input
+                  type="text"
+                  placeholder="例: 13:00〜, 午前中検診車"
+                  value={eventForm.notes}
+                  onChange={(e) => setEventForm({ ...eventForm, notes: e.target.value })}
+                  className="w-full px-3 py-2 border rounded-lg border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">ラベル色</label>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {[
+                    { label: '青', value: 'bg-blue-100 text-blue-800 border-blue-200' },
+                    { label: '緑', value: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
+                    { label: '橙', value: 'bg-amber-100 text-amber-800 border-amber-200' },
+                    { label: '紫', value: 'bg-purple-100 text-purple-800 border-purple-200' },
+                  ].map((colorOpt) => (
+                    <button
+                      key={colorOpt.value}
+                      type="button"
+                      onClick={() => setEventForm({ ...eventForm, color: colorOpt.value })}
+                      className={`py-1 rounded text-center font-bold border transition-transform ${
+                        colorOpt.value
+                      } ${eventForm.color === colorOpt.value ? 'ring-2 ring-blue-500 scale-105' : ''}`}
+                    >
+                      {colorOpt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between pt-2 border-t">
+              {plan.events[editingEventDate] ? (
+                <button
+                  type="button"
+                  onClick={handleDeleteEvent}
+                  className="flex items-center gap-1 text-xs text-rose-600 hover:text-rose-700 font-semibold px-2 py-1.5 rounded hover:bg-rose-50"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>削除</span>
+                </button>
+              ) : (
+                <div />
+              )}
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingEventDate(null)}
+                  className="px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100 rounded"
+                >
+                  キャンセル
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveEvent}
+                  className="flex items-center gap-1 px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-semibold shadow-xs"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  <span>保存</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>

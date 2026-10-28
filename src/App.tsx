@@ -4,7 +4,7 @@ import { ShiftMatrix } from './components/ShiftMatrix';
 import { ViolationPanel } from './components/ViolationPanel';
 import { StaffModal } from './components/StaffModal';
 import { SettingsModal } from './components/SettingsModal';
-import { MonthlySchedulePlan, ShiftTypeId, Staff, ConstraintRules } from './types/shift';
+import { MonthlySchedulePlan, ShiftTypeId, Staff, ConstraintRules, DayEvent } from './types/shift';
 import { createInitialSchedule } from './mock/initialData';
 import { validateSchedule } from './engine/validator';
 import { generateAutomatedSchedule } from './engine/generator';
@@ -120,6 +120,23 @@ export function App() {
     }));
   };
 
+  // 行事・イベントの更新・追加・削除
+  const handleUpdateEvent = (date: string, event: DayEvent | null) => {
+    setPlan((prev) => {
+      const newEvents = { ...prev.events };
+      if (event && event.title.trim()) {
+        newEvents[date] = event;
+      } else {
+        delete newEvents[date];
+      }
+      return {
+        ...prev,
+        events: newEvents,
+        updatedAt: new Date().toISOString(),
+      };
+    });
+  };
+
   // リセット
   const handleReset = () => {
     if (window.confirm('シフトの自動割当をクリアして初期状態に戻しますか？（確定ロックも解除されます）')) {
@@ -157,6 +174,7 @@ export function App() {
         validation={validation}
         onUpdateAssignment={handleUpdateAssignment}
         onToggleLock={handleToggleLock}
+        onUpdateEvent={handleUpdateEvent}
       />
 
       {/* 下部: リアルタイム警告・違反ドロワー */}

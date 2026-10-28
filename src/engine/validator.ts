@@ -249,8 +249,10 @@ export function validateSchedule(plan: MonthlySchedulePlan): ValidationSummary {
     }
 
     // NGペアチェック（同じシフトに入っているか）
+    // 仕様: 公休・有休の被りはNGペアから除外
     if (plan.rules.enableNgPairCheck) {
       Object.entries(assignedStaffByShift).forEach(([sId, staffIds]) => {
+        if (sId === 'HOLIDAY' || sId === 'PAID_LEAVE' || sId === 'NIGHT_NEXT') return;
         if (!staffIds || staffIds.length < 2) return;
         const shiftName = plan.shiftTypes[sId as ShiftTypeId]?.name || sId;
 
