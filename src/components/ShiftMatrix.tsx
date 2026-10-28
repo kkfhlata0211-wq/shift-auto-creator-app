@@ -25,7 +25,7 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
     date: string;
   } | null>(null);
 
-  const getShiftBadge = (shiftId?: ShiftTypeId) => {
+  const getShiftBadge = (shiftId?: ShiftTypeId, isLocked: boolean = false) => {
     if (!shiftId) {
       return (
         <span className="inline-block w-7 h-7 leading-7 text-center rounded text-xs text-slate-300 border border-dashed border-slate-200">
@@ -38,8 +38,12 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
 
     return (
       <span
-        className={`inline-flex items-center justify-center w-7 h-7 rounded text-xs font-bold border transition-transform hover:scale-105 shadow-xs ${def.color}`}
-        title={`${def.name} (${def.startTime}〜${def.endTime}, 実働${def.workHours}h)`}
+        className={`inline-flex items-center justify-center w-7 h-7 rounded text-xs font-bold border transition-transform hover:scale-105 shadow-xs ${def.color} ${
+          isLocked ? 'ring-2 ring-amber-400 ring-offset-1 font-extrabold' : ''
+        }`}
+        title={`${def.name} (${def.startTime}〜${def.endTime}, 実働${def.workHours}h)${
+          isLocked ? ' 【変更固定中】' : ''
+        }`}
       >
         {def.shortName}
       </span>
@@ -62,9 +66,12 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
           ))}
         </div>
 
-        <div className="flex items-center gap-4 text-slate-500">
-          <span className="flex items-center gap-1">
-            <Lock className="w-3 h-3 text-amber-500" /> 手動確定ロック
+        <div className="flex items-center gap-4 text-slate-600">
+          <span className="flex items-center gap-1.5 font-medium">
+            <span className="inline-flex items-center justify-center bg-amber-500 text-white rounded-full p-0.5 shadow-xs">
+              <Lock className="w-2.5 h-2.5 stroke-[2.5]" />
+            </span>
+            変更を固定中
           </span>
           <span className="flex items-center gap-1">
             <span className="w-2 h-2 rounded-full bg-rose-500 inline-block" /> ルール違反
@@ -235,21 +242,28 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
                           key={day.date}
                           onClick={() => setActiveCell({ staffId: staff.id, date: day.date })}
                           className={`relative p-1 text-center border-r border-slate-100 cursor-pointer select-none group min-w-[38px] max-w-[38px] ${
+                            isLocked ? 'bg-amber-50/50' : ''
+                          } ${
                             hasViolation ? 'bg-rose-50 ring-1 ring-inset ring-rose-300' : ''
                           }`}
                         >
                           <div className="flex items-center justify-center relative">
-                            {getShiftBadge(shiftId)}
+                            {getShiftBadge(shiftId, isLocked)}
 
-                            {/* ロックアイコン */}
+                            {/* ロックアイコン（大きく見やすいバッジ） */}
                             {isLocked && (
-                              <Lock className="w-2.5 h-2.5 text-amber-600 absolute -top-1 -right-1" />
+                              <span
+                                className="absolute -top-1.5 -right-1.5 bg-amber-500 text-white rounded-full p-0.5 shadow-md ring-1.5 ring-white z-10 flex items-center justify-center"
+                                title="変更を固定中（自動作成時も維持されます）"
+                              >
+                                <Lock className="w-3 h-3 stroke-[2.5]" />
+                              </span>
                             )}
 
                             {/* 違反インジケーター */}
                             {hasViolation && (
                               <span
-                                className="w-2 h-2 bg-rose-500 rounded-full absolute -top-1 -left-1 ring-2 ring-white"
+                                className="w-2 h-2 bg-rose-500 rounded-full absolute -top-1 -left-1 ring-2 ring-white z-10"
                                 title={cellViolations.map((v) => v.message).join('\n')}
                               />
                             )}
@@ -257,7 +271,7 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
                             {/* 希望休アイコン */}
                             {isRequested && (
                               <span
-                                className="text-[8px] bg-blue-600 text-white rounded-full w-2.5 h-2.5 absolute -bottom-1 -right-1 flex items-center justify-center font-bold"
+                                className="text-[8px] bg-blue-600 text-white rounded-full w-2.5 h-2.5 absolute -bottom-1 -right-1 flex items-center justify-center font-bold z-10"
                                 title="スタッフ希望"
                               >
                                 希
@@ -399,16 +413,21 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
               </span>
               <button
                 onClick={() => onToggleLock(activeCell.staffId, activeCell.date)}
-                className="flex items-center gap-1 text-xs px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded transition-colors"
+                className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg font-semibold transition-all shadow-xs ${
+                  plan.assignments[`${activeCell.staffId}_${activeCell.date}`]?.isLocked
+                    ? 'bg-amber-500 text-white hover:bg-amber-600 ring-2 ring-amber-300'
+                    : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                }`}
+                title="自動作成時にこのセルの勤務区分を変更されないよう固定します"
               >
                 {plan.assignments[`${activeCell.staffId}_${activeCell.date}`]?.isLocked ? (
                   <>
-                    <Lock className="w-3 h-3 text-amber-600" />
-                    <span>ロック解除</span>
+                    <Lock className="w-3.5 h-3.5 stroke-[2.5]" />
+                    <span>固定中（解除）</span>
                   </>
                 ) : (
                   <>
-                    <Unlock className="w-3 h-3 text-slate-500" />
+                    <Unlock className="w-3.5 h-3.5 text-slate-500" />
                     <span>変更を固定</span>
                   </>
                 )}
