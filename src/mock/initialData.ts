@@ -69,7 +69,7 @@ export const DEFAULT_SHIFT_TYPES: Record<ShiftTypeId, ShiftType> = {
   HOLIDAY: {
     id: 'HOLIDAY',
     name: '公休',
-    shortName: '公',
+    shortName: '休',
     startTime: '00:00',
     endTime: '00:00',
     workHours: 0,
@@ -157,6 +157,7 @@ export const INITIAL_STAFF: Staff[] = [
     employmentType: 'PART_TIME',
     canNightShift: false,
     monthlyMaxHours: 120,
+    weeklyMaxHours: 30,
     minHolidaysPerMonth: 12,
     skillLevel: 2,
     ngStaffIds: ['st_02'], // 鈴木とNGペア
@@ -165,9 +166,10 @@ export const INITIAL_STAFF: Staff[] = [
     id: 'st_07',
     name: '小林 誠',
     role: '介護助手',
-    employmentType: 'SHORT_TIME',
+    employmentType: 'PART_TIME',
     canNightShift: false,
     monthlyMaxHours: 80,
+    weeklyMaxHours: 20,
     minHolidaysPerMonth: 15,
     skillLevel: 1,
     ngStaffIds: [],

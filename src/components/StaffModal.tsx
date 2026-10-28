@@ -49,6 +49,7 @@ export const StaffModal: React.FC<StaffModalProps> = ({
       employmentType: 'FULL_TIME',
       canNightShift: false,
       monthlyMaxHours: 168,
+      weeklyMaxHours: 40,
       minHolidaysPerMonth: 9,
       skillLevel: 3,
       ngStaffIds: [],
@@ -116,7 +117,7 @@ export const StaffModal: React.FC<StaffModalProps> = ({
           {/* 上部: 新規追加ボタン */}
           <div className="flex justify-between items-center">
             <span className="text-xs text-slate-500">
-              合計: <strong className="text-slate-800">{staffList.length}名</strong>（正職員・パート・時短）
+              合計: <strong className="text-slate-800">{staffList.length}名</strong>（正社員・パート）
             </span>
             {!isAdding && !editingStaffId && (
               <button
@@ -183,23 +184,19 @@ export const StaffModal: React.FC<StaffModalProps> = ({
                   <label className="block text-slate-700 font-semibold mb-1">雇用形態</label>
                   <select
                     value={formData.employmentType}
-                    onChange={(e) =>
+                    onChange={(e) => {
+                      const newType = e.target.value as EmploymentType;
                       setFormData({
                         ...formData,
-                        employmentType: e.target.value as EmploymentType,
-                        monthlyMaxHours:
-                          e.target.value === 'FULL_TIME'
-                            ? 168
-                            : e.target.value === 'PART_TIME'
-                            ? 120
-                            : 80,
-                      })
-                    }
+                        employmentType: newType,
+                        monthlyMaxHours: newType === 'FULL_TIME' ? 168 : 120,
+                        weeklyMaxHours: newType === 'PART_TIME' ? 40 : undefined,
+                      });
+                    }}
                     className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     <option value="FULL_TIME">正社員 (常勤)</option>
-                    <option value="PART_TIME">パート</option>
-                    <option value="SHORT_TIME">時短パート</option>
+                    <option value="PART_TIME">パート (週上限管理)</option>
                   </select>
                 </div>
 
@@ -223,17 +220,38 @@ export const StaffModal: React.FC<StaffModalProps> = ({
                   </select>
                 </div>
 
-                <div>
-                  <label className="block text-slate-700 font-semibold mb-1">月間上限労働時間 (h)</label>
-                  <input
-                    type="number"
-                    value={formData.monthlyMaxHours}
-                    onChange={(e) =>
-                      setFormData({ ...formData, monthlyMaxHours: Number(e.target.value) })
-                    }
-                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
+                {formData.employmentType === 'PART_TIME' ? (
+                  <div>
+                    <label className="block text-slate-700 font-semibold mb-1">
+                      週間上限労働時間 (h) <span className="text-blue-600 font-normal">※最大40h</span>
+                    </label>
+                    <input
+                      type="number"
+                      max={40}
+                      min={1}
+                      value={formData.weeklyMaxHours ?? 40}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          weeklyMaxHours: Math.min(40, Number(e.target.value)),
+                        })
+                      }
+                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-bold text-blue-700"
+                    />
+                  </div>
+                ) : (
+                  <div>
+                    <label className="block text-slate-700 font-semibold mb-1">月間上限労働時間 (h)</label>
+                    <input
+                      type="number"
+                      value={formData.monthlyMaxHours}
+                      onChange={(e) =>
+                        setFormData({ ...formData, monthlyMaxHours: Number(e.target.value) })
+                      }
+                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-bold"
+                    />
+                  </div>
+                )}
 
                 <div>
                   <label className="block text-slate-700 font-semibold mb-1">月間最低公休日数</label>
@@ -306,7 +324,7 @@ export const StaffModal: React.FC<StaffModalProps> = ({
                   <th className="px-3 py-3">役職 / 雇用</th>
                   <th className="px-3 py-3 text-center">スキル</th>
                   <th className="px-3 py-3 text-center">夜勤</th>
-                  <th className="px-3 py-3 text-center">月上限時間</th>
+                  <th className="px-3 py-3 text-center">上限労働時間</th>
                   <th className="px-3 py-3">NGペア</th>
                   <th className="px-4 py-3 text-right">操作</th>
                 </tr>
@@ -325,11 +343,7 @@ export const StaffModal: React.FC<StaffModalProps> = ({
                       <td className="px-3 py-3 text-slate-600">
                         <div>{staff.role}</div>
                         <div className="text-[10px] text-slate-400">
-                          {staff.employmentType === 'FULL_TIME'
-                            ? '正社員'
-                            : staff.employmentType === 'PART_TIME'
-                            ? 'パート'
-                            : '時短'}
+                          {staff.employmentType === 'FULL_TIME' ? '正社員' : 'パート'}
                         </div>
                       </td>
                       <td className="px-3 py-3 text-center">
@@ -349,7 +363,11 @@ export const StaffModal: React.FC<StaffModalProps> = ({
                         )}
                       </td>
                       <td className="px-3 py-3 text-center font-medium text-slate-700">
-                        {staff.monthlyMaxHours}h
+                        {staff.employmentType === 'PART_TIME' ? (
+                          <span className="text-blue-700 font-bold">週 {staff.weeklyMaxHours ?? 40}h</span>
+                        ) : (
+                          <span>月 {staff.monthlyMaxHours}h</span>
+                        )}
                       </td>
                       <td className="px-3 py-3">
                         {ngNames.length > 0 ? (

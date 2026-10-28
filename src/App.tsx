@@ -13,7 +13,20 @@ import { loadPlanFromStorage, savePlanToStorage } from './utils/storage';
 export function App() {
   const [plan, setPlan] = useState<MonthlySchedulePlan>(() => {
     const saved = loadPlanFromStorage();
-    if (saved) return saved;
+    if (saved) {
+      // 既存データの正規化（公->休、時短->パートへの移行互換性）
+      if (saved.shiftTypes?.HOLIDAY) {
+        saved.shiftTypes.HOLIDAY.shortName = '休';
+      }
+      if (saved.staffList) {
+        saved.staffList = saved.staffList.map((s: any) => ({
+          ...s,
+          employmentType: s.employmentType === 'SHORT_TIME' ? 'PART_TIME' : s.employmentType,
+          weeklyMaxHours: s.employmentType === 'PART_TIME' ? (s.weeklyMaxHours || 40) : s.weeklyMaxHours,
+        }));
+      }
+      return saved;
+    }
     return createInitialSchedule('2026-11');
   });
 

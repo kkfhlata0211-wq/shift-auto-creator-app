@@ -37,15 +37,31 @@ export function generateAutomatedSchedule(
 
   // スタッフ毎のカウンター初期化
   const staffWorkHours: Record<string, number> = {};
+  const staffWeeklyWorkHours: Record<string, Record<number, number>> = {};
   const staffNightCounts: Record<string, number> = {};
   const staffWeekendCounts: Record<string, number> = {};
   const staffHolidayCounts: Record<string, number> = {};
 
   plan.staffList.forEach((s) => {
     staffWorkHours[s.id] = 0;
+    staffWeeklyWorkHours[s.id] = {};
     staffNightCounts[s.id] = 0;
     staffWeekendCounts[s.id] = 0;
     staffHolidayCounts[s.id] = 0;
+  });
+
+  // 初期リクエスト・ロック済みセルの労働時間を積算
+  Object.values(newAssignments).forEach((assign) => {
+    const shift = plan.shiftTypes[assign.shiftTypeId];
+    if (shift?.isWork) {
+      const day = days.find((d) => d.date === assign.date);
+      if (day) {
+        staffWorkHours[assign.staffId] = (staffWorkHours[assign.staffId] || 0) + shift.workHours;
+        const wIdx = day.weekIndex;
+        if (!staffWeeklyWorkHours[assign.staffId]) staffWeeklyWorkHours[assign.staffId] = {};
+        staffWeeklyWorkHours[assign.staffId][wIdx] = (staffWeeklyWorkHours[assign.staffId][wIdx] || 0) + shift.workHours;
+      }
+    }
   });
 
   // ヘルパー: 直近の連勤数を計算
@@ -87,7 +103,7 @@ export function generateAutomatedSchedule(
           const consec = getConsecutiveDaysBefore(s.id, dayIndex);
           if (consec >= plan.rules.maxConsecutiveWorkDays) return false;
 
-          // 翌日にロックされた出勤がないか確認
+          // 翌日にロックされた出勤がないか確認（夜勤翌日は明番または公休・有休）
           if (dayIndex < days.length - 1) {
             const nextDay = days[dayIndex + 1];
             const nextKey = `${s.id}_${nextDay.date}`;
@@ -98,6 +114,26 @@ export function generateAutomatedSchedule(
               }
             }
           }
+
+          // 明けの翌日（2日後）にロックされた出勤がないか確認（明けの次の日は休日）
+          if (dayIndex < days.length - 2) {
+            const dayAfterNext = days[dayIndex + 2];
+            const dayAfterNextKey = `${s.id}_${dayAfterNext.date}`;
+            const dayAfterNextAssign = newAssignments[dayAfterNextKey];
+            if (dayAfterNextAssign && (dayAfterNextAssign.isLocked || dayAfterNextAssign.isRequested)) {
+              if (dayAfterNextAssign.shiftTypeId !== 'HOLIDAY' && dayAfterNextAssign.shiftTypeId !== 'PAID_LEAVE') {
+                return false;
+              }
+            }
+          }
+
+          // パートの場合、週上限40hに夜勤（16h）が収まるか確認
+          if (s.employmentType === 'PART_TIME') {
+            const weekMax = s.weeklyMaxHours || 40;
+            const currentWeekHours = staffWeeklyWorkHours[s.id]?.[day.weekIndex] || 0;
+            if (currentWeekHours + 16 > weekMax) return false;
+          }
+
           return true;
         })
         .sort((a, b) => (staffNightCounts[a.id] || 0) - (staffNightCounts[b.id] || 0));
@@ -114,6 +150,9 @@ export function generateAutomatedSchedule(
         };
         staffNightCounts[selected.id] = (staffNightCounts[selected.id] || 0) + 1;
         staffWorkHours[selected.id] += 16;
+        if (!staffWeeklyWorkHours[selected.id]) staffWeeklyWorkHours[selected.id] = {};
+        staffWeeklyWorkHours[selected.id][day.weekIndex] =
+          (staffWeeklyWorkHours[selected.id][day.weekIndex] || 0) + 16;
 
         // 翌日は明番（または希望休が既にあればそのまま）
         if (dayIndex < days.length - 1) {
@@ -127,6 +166,22 @@ export function generateAutomatedSchedule(
               isLocked: false,
               isRequested: false,
             };
+          }
+        }
+
+        // 明けの次の日は休日（休）
+        if (dayIndex < days.length - 2) {
+          const dayAfterNext = days[dayIndex + 2];
+          const dayAfterNextKey = `${selected.id}_${dayAfterNext.date}`;
+          if (!newAssignments[dayAfterNextKey]) {
+            newAssignments[dayAfterNextKey] = {
+              staffId: selected.id,
+              date: dayAfterNext.date,
+              shiftTypeId: 'HOLIDAY',
+              isLocked: false,
+              isRequested: false,
+            };
+            staffHolidayCounts[selected.id] = (staffHolidayCounts[selected.id] || 0) + 1;
           }
         }
       }
@@ -157,16 +212,35 @@ export function generateAutomatedSchedule(
       let score = 0;
       const consec = getConsecutiveDaysBefore(staff.id, dayIndex);
 
+      // 明けの次の日は休とする（前日が明番の場合は出勤不可）
+      if (dayIndex > 0) {
+        const prevDay = days[dayIndex - 1];
+        const prevKey = `${staff.id}_${prevDay.date}`;
+        if (newAssignments[prevKey]?.shiftTypeId === 'NIGHT_NEXT') {
+          return -9999;
+        }
+      }
+
       // 連勤上限に近い場合は出勤スコアを下げる
       if (consec >= plan.rules.maxConsecutiveWorkDays) {
         return -9999;
       }
       score -= consec * 20;
 
-      // 月間労働時間の余裕
-      const hoursRemaining = staff.monthlyMaxHours - staffWorkHours[staff.id];
-      if (hoursRemaining <= 0) return -9999;
-      score += hoursRemaining;
+      // パート: 週単位（最大40h）のチェック
+      // 正社員: 月単位の契約上限時間のチェック
+      if (staff.employmentType === 'PART_TIME') {
+        const weekMax = staff.weeklyMaxHours || 40;
+        const currentWeekHours = staffWeeklyWorkHours[staff.id]?.[day.weekIndex] || 0;
+        if (currentWeekHours + 8 > weekMax) {
+          return -9999;
+        }
+        score += (weekMax - currentWeekHours) * 2;
+      } else {
+        const hoursRemaining = staff.monthlyMaxHours - staffWorkHours[staff.id];
+        if (hoursRemaining < 8) return -9999;
+        score += hoursRemaining;
+      }
 
       // 土日の出勤平準化
       if (day.isWeekend && plan.rules.balanceWeekendShifts) {
@@ -216,6 +290,10 @@ export function generateAutomatedSchedule(
         };
 
         staffWorkHours[chosen.id] += 8;
+        if (!staffWeeklyWorkHours[chosen.id]) staffWeeklyWorkHours[chosen.id] = {};
+        staffWeeklyWorkHours[chosen.id][day.weekIndex] =
+          (staffWeeklyWorkHours[chosen.id][day.weekIndex] || 0) + 8;
+
         if (day.isWeekend) staffWeekendCounts[chosen.id] = (staffWeekendCounts[chosen.id] || 0) + 1;
 
         // unassignedStaff から除外
@@ -224,16 +302,29 @@ export function generateAutomatedSchedule(
       }
     });
 
-    // 枠に選ばれなかったスタッフは「公休」または「日勤（余剰・研修など）」
+    // 枠に選ばれなかったスタッフは「休日（休）」または「日勤（余剰・研修など）」
     unassignedStaff.forEach((staff) => {
       const key = `${staff.id}_${day.date}`;
-      const hoursRemaining = staff.monthlyMaxHours - staffWorkHours[staff.id];
       const consec = getConsecutiveDaysBefore(staff.id, dayIndex);
 
-      // 公休日数が足りない、または連勤上限、または月間労働時間オーバー時は公休
+      // 前日が明番の場合、明けの次は必ず休
+      const prevDayWasNightNext =
+        dayIndex > 0 &&
+        newAssignments[`${staff.id}_${days[dayIndex - 1].date}`]?.shiftTypeId === 'NIGHT_NEXT';
+
+      // 労働時間上限の判定
+      const isPartTime = staff.employmentType === 'PART_TIME';
+      const weeklyMax = staff.weeklyMaxHours || 40;
+      const currentWeekHours = staffWeeklyWorkHours[staff.id]?.[day.weekIndex] || 0;
+      const weeklyOver = isPartTime && currentWeekHours + 8 > weeklyMax;
+      const monthlyOver = !isPartTime && staff.monthlyMaxHours - staffWorkHours[staff.id] < 8;
+
+      // 休日を割り当てるべき条件
       if (
+        prevDayWasNightNext ||
+        weeklyOver ||
+        monthlyOver ||
         consec >= 3 ||
-        hoursRemaining < 8 ||
         staffHolidayCounts[staff.id] < staff.minHolidaysPerMonth
       ) {
         newAssignments[key] = {
@@ -254,6 +345,10 @@ export function generateAutomatedSchedule(
           isRequested: false,
         };
         staffWorkHours[staff.id] += 8;
+        if (!staffWeeklyWorkHours[staff.id]) staffWeeklyWorkHours[staff.id] = {};
+        staffWeeklyWorkHours[staff.id][day.weekIndex] =
+          (staffWeeklyWorkHours[staff.id][day.weekIndex] || 0) + 8;
+
         if (day.isWeekend) staffWeekendCounts[staff.id] = (staffWeekendCounts[staff.id] || 0) + 1;
       }
     });

@@ -3,7 +3,7 @@
  */
 
 // 雇用形態
-export type EmploymentType = 'FULL_TIME' | 'PART_TIME' | 'SHORT_TIME';
+export type EmploymentType = 'FULL_TIME' | 'PART_TIME';
 
 // 勤務区分の識別ID
 export type ShiftTypeId = 'DAY' | 'EARLY' | 'LATE' | 'NIGHT' | 'NIGHT_NEXT' | 'HOLIDAY' | 'PAID_LEAVE';
@@ -12,7 +12,7 @@ export type ShiftTypeId = 'DAY' | 'EARLY' | 'LATE' | 'NIGHT' | 'NIGHT_NEXT' | 'H
 export interface ShiftType {
   id: ShiftTypeId;
   name: string;            // '日勤', '早番', '遅番', '夜勤', '明番', '公休', '有休'
-  shortName: string;       // '日', '早', '遅', '夜', '明', '公', '有'
+  shortName: string;       // '日', '早', '遅', '夜', '明', '休', '有'
   startTime: string;       // '09:00' ('16:00' 等)
   endTime: string;         // '18:00' ('09:00' 等)
   workHours: number;       // 実働時間（例: 日勤8h, 夜勤16h, 休日0h）
@@ -30,7 +30,8 @@ export interface Staff {
   role: string;                     // '看護師', '介護福祉士', '介護助手' 等
   employmentType: EmploymentType;   // 正社員, パート, 時短パート
   canNightShift: boolean;           // 夜勤可否フラグ
-  monthlyMaxHours: number;          // 月の契約・法定労働時間上限（変形労働制）
+  monthlyMaxHours: number;          // 正社員: 月の契約・法定労働時間上限（変形労働制）
+  weeklyMaxHours?: number;          // パート: 週の契約・法定労働時間上限（最大40h）
   minHolidaysPerMonth: number;      // 月間必須公休日数（例: 8日〜10日）
   skillLevel: 1 | 2 | 3 | 4 | 5;    // スキル・役割（1〜5段階）
   ngStaffIds: string[];             // 同一シフト不可のスタッフID（NGペア）
@@ -97,10 +98,12 @@ export interface RuleViolation {
   date: string;
   ruleType:
     | 'CONSECUTIVE_DAYS'        // 連勤オーバー
-    | 'NIGHT_SHIFT_AFTERMATH'   // 夜勤翌日違反
+    | 'NIGHT_SHIFT_AFTERMATH'   // 夜勤翌日違反（公休/明番以外）
+    | 'NIGHT_NEXT_AFTERMATH'    // 明け翌日違反（休日以外）
     | 'NG_PAIR'                 // NGペア同席
     | 'SHORTAGE'                // 人員不足
-    | 'EXCEED_MONTHLY_HOURS'    // 月間労働時間超過
+    | 'EXCEED_MONTHLY_HOURS'    // 月間労働時間超過（正社員）
+    | 'EXCEED_WEEKLY_HOURS'     // 週間労働時間超過（パート・最大40h）
     | 'INTERVAL_SHORTAGE'       // 勤務間インターバル不足
     | 'SKILL_DEFICIT';          // スキル不足
   message: string;

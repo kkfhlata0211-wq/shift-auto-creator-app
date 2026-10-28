@@ -122,8 +122,8 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
                 <th className="sticky left-36 z-30 bg-slate-100 px-2 py-2 font-bold text-slate-700 w-24 border-r border-slate-200 text-center">
                   職種 / スキル
                 </th>
-                <th className="sticky left-60 z-30 bg-slate-100 px-2 py-2 font-bold text-slate-700 w-24 border-r border-slate-200 text-center">
-                  当月労働時間
+                <th className="sticky left-60 z-30 bg-slate-100 px-2 py-2 font-bold text-slate-700 w-28 border-r border-slate-200 text-center">
+                  労働時間 / 上限
                 </th>
                 {days.map((day) => {
                   const isSun = day.isSunday;
@@ -171,11 +171,7 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
                             )}
                           </div>
                           <div className="text-[10px] text-slate-400">
-                            {staff.employmentType === 'FULL_TIME'
-                              ? '常勤'
-                              : staff.employmentType === 'PART_TIME'
-                              ? 'パート'
-                              : '時短'}
+                            {staff.employmentType === 'FULL_TIME' ? '常勤' : 'パート'}
                           </div>
                         </div>
                       </div>
@@ -197,14 +193,31 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
                         hoursInfo.isOver ? 'bg-rose-50' : ''
                       }`}
                     >
-                      <div
-                        className={`text-xs font-bold ${
-                          hoursInfo.isOver ? 'text-rose-600' : 'text-slate-700'
-                        }`}
-                      >
-                        {hoursInfo.totalHours}h
-                      </div>
-                      <div className="text-[10px] text-slate-400">/ 上限{staff.monthlyMaxHours}h</div>
+                      {staff.employmentType === 'PART_TIME' ? (
+                        <>
+                          <div
+                            className={`text-xs font-bold ${
+                              hoursInfo.isOver ? 'text-rose-600' : 'text-blue-700'
+                            }`}
+                          >
+                            最大 {hoursInfo.maxWeekHours}h/週
+                          </div>
+                          <div className="text-[9px] text-slate-400">
+                            週上限{staff.weeklyMaxHours || 40}h (月{hoursInfo.totalHours}h)
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div
+                            className={`text-xs font-bold ${
+                              hoursInfo.isOver ? 'text-rose-600' : 'text-slate-700'
+                            }`}
+                          >
+                            {hoursInfo.totalHours}h
+                          </div>
+                          <div className="text-[10px] text-slate-400">/ 上限{staff.monthlyMaxHours}h</div>
+                        </>
+                      )}
                     </td>
 
                     {/* 日付セル */}
