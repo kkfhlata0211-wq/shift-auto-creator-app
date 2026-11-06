@@ -72,6 +72,21 @@ export function validateSchedule(plan: MonthlySchedulePlan): ValidationSummary {
         weeklyWorkDaysCount[day.weekIndex] = (weeklyWorkDaysCount[day.weekIndex] || 0) + 1;
       }
 
+      // パート: 早・日・遅固定シフトチェック
+      if (isPartTime && staff.fixedShiftType && shiftId && shift?.isWork) {
+        if (shiftId !== 'PAID_LEAVE' && shiftId !== staff.fixedShiftType) {
+          addViolation({
+            id: `v_fixed_shift_type_${staff.id}_${day.date}`,
+            severity: 'WARNING',
+            staffId: staff.id,
+            staffName: staff.name,
+            date: day.date,
+            ruleType: 'FIXED_SHIFT_TYPE_MISMATCH',
+            message: `【${plan.shiftTypes[staff.fixedShiftType]?.name || staff.fixedShiftType}固定】ですが、${shift?.name || shiftId}が割り当てられています`,
+          });
+        }
+      }
+
       // パート: 曜日固定シフトチェック
       if (isPartTime && staff.fixedDayShifts) {
         const fixedShiftId = staff.fixedDayShifts[day.dayOfWeekIndex];
@@ -230,18 +245,8 @@ export function validateSchedule(plan: MonthlySchedulePlan): ValidationSummary {
       }
     }
 
-    if (isPartTime && totalWorkHours !== staff.monthlyMaxHours) {
-      contractHoursMismatch = true;
-      addViolation({
-        id: `v_part_time_contract_hours_${staff.id}`,
-        severity: 'ERROR',
-        staffId: staff.id,
-        staffName: staff.name,
-        date: days[days.length - 1].date,
-        ruleType: 'PART_TIME_CONTRACT_HOURS_MISMATCH',
-        message: `月間契約労働時間（${staff.monthlyMaxHours}h）と不一致です（現在: ${totalWorkHours}h / 差分: ${totalWorkHours - staff.monthlyMaxHours > 0 ? '+' : ''}${totalWorkHours - staff.monthlyMaxHours}h）`,
-      });
-    }
+    // パートは週単位（40hまで・週勤務日数）管理のため、月間契約時間の合致チェックは対象外
+    // 正社員のみ所定労働時間（targetMonthlyHours）の合致チェックを行う
 
     const isMonthlyOver = !isPartTime && totalWorkHours > staff.monthlyMaxHours;
     if (isMonthlyOver) {

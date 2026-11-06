@@ -275,9 +275,64 @@ export const StaffModal: React.FC<StaffModalProps> = ({
                   </label>
                 </div>
 
-                {/* パート専用設定: 週勤務日数 & 曜日固定シフト */}
+                {/* パート専用設定: 早・日・遅固定 & 週勤務日数 & 曜日固定シフト */}
                 {formData.employmentType === 'PART_TIME' && (
                   <>
+                    {/* 早・日・遅固定設定 */}
+                    <div className="col-span-3 pt-3 border-t border-blue-100">
+                      <label className="block text-slate-700 font-semibold mb-1.5">
+                        勤務区分の固定（早・日・遅固定）
+                      </label>
+                      <div className="flex flex-wrap gap-2">
+                        {[
+                          { id: undefined, label: '指定なし（全般）' },
+                          {
+                            id: 'EARLY',
+                            label: '早番固定（早）',
+                            color: 'bg-amber-100 text-amber-800 border-amber-300',
+                          },
+                          {
+                            id: 'DAY',
+                            label: '日勤固定（日）',
+                            color: 'bg-blue-100 text-blue-800 border-blue-300',
+                          },
+                          {
+                            id: 'LATE',
+                            label: '遅番固定（遅）',
+                            color: 'bg-orange-100 text-orange-800 border-orange-300',
+                          },
+                        ].map((opt) => {
+                          const isSelected =
+                            formData.fixedShiftType === opt.id ||
+                            (!formData.fixedShiftType && opt.id === undefined);
+                          return (
+                            <button
+                              key={opt.id ?? 'none'}
+                              type="button"
+                              onClick={() =>
+                                setFormData({
+                                  ...formData,
+                                  fixedShiftType: opt.id as ShiftTypeId | undefined,
+                                })
+                              }
+                              className={`px-3 py-1.5 rounded-lg border text-xs font-bold transition-all ${
+                                isSelected
+                                  ? opt.color
+                                    ? `${opt.color} shadow-xs ring-2 ring-blue-500 font-black`
+                                    : 'bg-slate-700 text-white border-slate-700 shadow-xs ring-1 ring-slate-500'
+                                  : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
+                              }`}
+                            >
+                              {opt.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <span className="text-[10px] text-slate-400 mt-1 block">
+                        ※ 特定の勤務区分（日勤専従など）に固定したい場合に設定します。自動作成時も固定区分のみ割り当てられます。
+                      </span>
+                    </div>
+
                     {/* 週の勤務日数（複数選択可） */}
                     <div className="col-span-3 pt-3 border-t border-blue-100">
                       <label className="block text-slate-700 font-semibold mb-1">
@@ -434,8 +489,27 @@ export const StaffModal: React.FC<StaffModalProps> = ({
                       </td>
                       <td className="px-3 py-3 text-slate-600">
                         <div>{staff.role}</div>
-                        <div className="text-[10px] text-slate-400">
-                          {staff.employmentType === 'FULL_TIME' ? '正社員' : 'パート'}
+                        <div className="flex items-center gap-1 mt-0.5">
+                          <span className="text-[10px] text-slate-400">
+                            {staff.employmentType === 'FULL_TIME' ? '正社員' : 'パート'}
+                          </span>
+                          {staff.fixedShiftType && (
+                            <span
+                              className={`text-[9px] px-1 py-0.2 rounded font-bold border ${
+                                staff.fixedShiftType === 'EARLY'
+                                  ? 'bg-amber-100 text-amber-800 border-amber-300'
+                                  : staff.fixedShiftType === 'DAY'
+                                  ? 'bg-blue-100 text-blue-800 border-blue-300'
+                                  : 'bg-orange-100 text-orange-800 border-orange-300'
+                              }`}
+                            >
+                              {staff.fixedShiftType === 'EARLY'
+                                ? '早番固定'
+                                : staff.fixedShiftType === 'DAY'
+                                ? '日勤固定'
+                                : '遅番固定'}
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td className="px-3 py-3 text-center">
@@ -458,7 +532,8 @@ export const StaffModal: React.FC<StaffModalProps> = ({
                         {staff.employmentType === 'PART_TIME' ? (
                           <div>
                             <div className="text-[10px] text-blue-700 font-semibold">
-                              週上限 {staff.weeklyMaxHours ?? 40}h
+                              週契約時間
+                              <div>{staff.weeklyMaxHours ?? 40}h</div>
                             </div>
                             {staff.allowedWeeklyWorkDays && staff.allowedWeeklyWorkDays.length > 0 && (
                               <div className="text-[10px] text-blue-600 font-semibold mt-0.5">

@@ -64,21 +64,22 @@ export function App() {
     setIsGenerating(true);
     // UIの描画更新を挟んでから計算実行
     setTimeout(() => {
+      const generatedAssignments = generateAutomatedSchedule(plan, { preserveLocked: true });
       setPlan((prev) => ({
         ...prev,
-        assignments: generateAutomatedSchedule(prev, { preserveLocked: true }),
+        assignments: generatedAssignments,
         updatedAt: new Date().toISOString(),
       }));
       setIsGenerating(false);
     }, 200);
   };
 
-  // 手動セルの更新
+  // 手動セルの更新（勝手に固定されないようにデフォルトは false）
   const handleUpdateAssignment = (
     staffId: string,
     date: string,
     shiftTypeId: ShiftTypeId,
-    isLocked = true
+    isLocked = false
   ) => {
     const key = `${staffId}_${date}`;
     setPlan((prev) => ({
@@ -201,12 +202,9 @@ export function App() {
 
   // リセット
   const handleReset = () => {
-    if (window.confirm('シフト割り当てをクリアしますか？（スタッフ・設定・確定ロックも保持されます）')) {
-      setPlan((prev) => ({
-        ...prev,
-        assignments: {},
-        updatedAt: new Date().toISOString(),
-      }));
+    if (window.confirm('シフトの自動割当をクリアして初期状態に戻しますか？（確定ロックも解除されます）')) {
+      const initial = createInitialSchedule(plan.yearMonth);
+      setPlan(initial);
     }
   };
 

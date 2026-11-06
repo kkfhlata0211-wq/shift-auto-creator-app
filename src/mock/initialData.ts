@@ -158,6 +158,7 @@ export const INITIAL_STAFF: Staff[] = [
     canNightShift: false,
     monthlyMaxHours: 120,
     weeklyMaxHours: 30,
+    fixedShiftType: 'DAY', // 日勤固定パート
     minHolidaysPerMonth: 12,
     skillLevel: 2,
     ngStaffIds: ['st_02'], // 鈴木とNGペア
