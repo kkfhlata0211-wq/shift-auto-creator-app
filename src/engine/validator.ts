@@ -15,6 +15,7 @@ export interface ValidationSummary {
     isWeeklyOver: boolean;
     targetHoursMismatch?: boolean;
     targetHoursDiff?: number;
+    contractHoursMismatch?: boolean;
   }>;
   dailyCoverageSummary: Record<string, {
     requiredDay: number;
@@ -74,7 +75,7 @@ export function validateSchedule(plan: MonthlySchedulePlan): ValidationSummary {
       // パート: 曜日固定シフトチェック
       if (isPartTime && staff.fixedDayShifts) {
         const fixedShiftId = staff.fixedDayShifts[day.dayOfWeekIndex];
-        if (fixedShiftId && shiftId && shiftId !== fixedShiftId) {
+        if (fixedShiftId && shiftId !== fixedShiftId) {
           addViolation({
             id: `v_fixed_shift_${staff.id}_${day.date}`,
             severity: 'WARNING',
@@ -82,7 +83,7 @@ export function validateSchedule(plan: MonthlySchedulePlan): ValidationSummary {
             staffName: staff.name,
             date: day.date,
             ruleType: 'FIXED_SHIFT_MISMATCH',
-            message: `${day.dayOfWeek}曜日は固定シフト【${plan.shiftTypes[fixedShiftId]?.name || fixedShiftId}】と異なります（現在: ${shift?.name || shiftId}）`,
+            message: `${day.dayOfWeek}曜日は固定シフト【${plan.shiftTypes[fixedShiftId]?.name || fixedShiftId}】と異なります（現在: ${shift?.name || shiftId || '未割当'}）`,
           });
         }
       }
@@ -159,14 +160,23 @@ export function validateSchedule(plan: MonthlySchedulePlan): ValidationSummary {
     // パート: 週単位（最大40h）のチェック & 週の勤務日数チェック
     // 正社員: 月の所定労働時間チェック & 変形労働制上限チェック
     const weeklyMax = staff.weeklyMaxHours || 40;
+    const allowedWeeklyWorkDays = staff.allowedWeeklyWorkDays;
+    const isWeeklyWorkDaysMatched = (weekIndex: number): boolean => {
+      const weekDays = days.filter((day) => day.weekIndex === weekIndex);
+      return (
+        weekDays.length >= 5 &&
+        !!allowedWeeklyWorkDays?.includes(weeklyWorkDaysCount[weekIndex] || 0)
+      );
+    };
     let maxWeekHours = 0;
     let isWeeklyOver = false;
 
     Object.entries(weeklyHours).forEach(([wIdx, hours]) => {
       if (hours > maxWeekHours) maxWeekHours = hours;
-      if (isPartTime && hours > weeklyMax) {
+      const weekIndex = Number(wIdx);
+      if (isPartTime && hours > weeklyMax && !isWeeklyWorkDaysMatched(weekIndex)) {
         isWeeklyOver = true;
-        const weekDays = days.filter((d) => d.weekIndex === Number(wIdx));
+        const weekDays = days.filter((d) => d.weekIndex === weekIndex);
         const violationDate = weekDays[weekDays.length - 1]?.date || days[days.length - 1].date;
         addViolation({
           id: `v_weekly_hours_${staff.id}_w${wIdx}`,
@@ -181,18 +191,20 @@ export function validateSchedule(plan: MonthlySchedulePlan): ValidationSummary {
     });
 
     // パート: 週の勤務日数（複数選択可）チェック
-    if (isPartTime && staff.allowedWeeklyWorkDays && staff.allowedWeeklyWorkDays.length > 0) {
-      Object.entries(weeklyWorkDaysCount).forEach(([wIdx, count]) => {
-        const weekDays = days.filter((d) => d.weekIndex === Number(wIdx));
-        if (weekDays.length >= 5 && !staff.allowedWeeklyWorkDays!.includes(count)) {
+    if (isPartTime && allowedWeeklyWorkDays && allowedWeeklyWorkDays.length > 0) {
+      const weekIndexes = [...new Set(days.map((day) => day.weekIndex))];
+      weekIndexes.forEach((weekIndex) => {
+        const weekDays = days.filter((d) => d.weekIndex === weekIndex);
+        const count = weeklyWorkDaysCount[weekIndex] || 0;
+        if (weekDays.length >= 5 && !allowedWeeklyWorkDays.includes(count)) {
           addViolation({
-            id: `v_weekly_days_${staff.id}_w${wIdx}`,
+            id: `v_weekly_days_${staff.id}_w${weekIndex}`,
             severity: 'WARNING',
             staffId: staff.id,
             staffName: staff.name,
             date: weekDays[weekDays.length - 1].date,
             ruleType: 'WEEKLY_DAYS_MISMATCH',
-            message: `第${Number(wIdx) + 1}週の勤務日数（${count}日）が設定（週${staff.allowedWeeklyWorkDays!.sort().join('・')}日）と一致していません`,
+            message: `第${weekIndex + 1}週の勤務日数（${count}日）が設定（週${[...allowedWeeklyWorkDays].sort().join('・')}日）と一致していません`,
           });
         }
       });
@@ -201,13 +213,14 @@ export function validateSchedule(plan: MonthlySchedulePlan): ValidationSummary {
     // 正社員: 月の所定労働時間（合致チェック）
     let targetHoursMismatch = false;
     let targetHoursDiff = 0;
+    let contractHoursMismatch = false;
     if (!isPartTime && plan.targetMonthlyHours && plan.targetMonthlyHours > 0) {
       if (totalWorkHours !== plan.targetMonthlyHours) {
         targetHoursMismatch = true;
         targetHoursDiff = totalWorkHours - plan.targetMonthlyHours;
         addViolation({
           id: `v_target_hours_${staff.id}`,
-          severity: 'WARNING',
+          severity: 'ERROR',
           staffId: staff.id,
           staffName: staff.name,
           date: days[days.length - 1].date,
@@ -215,6 +228,19 @@ export function validateSchedule(plan: MonthlySchedulePlan): ValidationSummary {
           message: `所定労働時間（${plan.targetMonthlyHours}h）と不一致です（現在: ${totalWorkHours}h / 差分: ${targetHoursDiff > 0 ? '+' : ''}${targetHoursDiff}h）`,
         });
       }
+    }
+
+    if (isPartTime && totalWorkHours !== staff.monthlyMaxHours) {
+      contractHoursMismatch = true;
+      addViolation({
+        id: `v_part_time_contract_hours_${staff.id}`,
+        severity: 'ERROR',
+        staffId: staff.id,
+        staffName: staff.name,
+        date: days[days.length - 1].date,
+        ruleType: 'PART_TIME_CONTRACT_HOURS_MISMATCH',
+        message: `月間契約労働時間（${staff.monthlyMaxHours}h）と不一致です（現在: ${totalWorkHours}h / 差分: ${totalWorkHours - staff.monthlyMaxHours > 0 ? '+' : ''}${totalWorkHours - staff.monthlyMaxHours}h）`,
+      });
     }
 
     const isMonthlyOver = !isPartTime && totalWorkHours > staff.monthlyMaxHours;
@@ -233,13 +259,14 @@ export function validateSchedule(plan: MonthlySchedulePlan): ValidationSummary {
     staffHoursSummary[staff.id] = {
       totalHours: totalWorkHours,
       maxHours: staff.monthlyMaxHours,
-      isOver: isPartTime ? isWeeklyOver : (isMonthlyOver || targetHoursMismatch),
+      isOver: isPartTime ? (isWeeklyOver || contractHoursMismatch) : (isMonthlyOver || targetHoursMismatch),
       weeklyHours,
       weeklyMaxHours: isPartTime ? weeklyMax : undefined,
       maxWeekHours,
       isWeeklyOver,
       targetHoursMismatch,
       targetHoursDiff,
+      contractHoursMismatch,
     };
   });
 

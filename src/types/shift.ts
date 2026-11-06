@@ -30,7 +30,7 @@ export interface Staff {
   role: string;                     // '看護師', '介護福祉士', '介護助手' 等
   employmentType: EmploymentType;   // 正社員, パート, 時短パート
   canNightShift: boolean;           // 夜勤可否フラグ
-  monthlyMaxHours: number;          // 正社員: 月の契約・法定労働時間上限（変形労働制）
+  monthlyMaxHours: number;          // 月の契約労働時間（常勤は上限も兼ねる）
   weeklyMaxHours?: number;          // パート: 週の契約・法定労働時間上限（最大40h）
   minHolidaysPerMonth: number;      // 月間必須公休日数（例: 8日〜10日）
   skillLevel: 1 | 2 | 3 | 4 | 5;    // スキル・役割（1〜5段階）
@@ -107,6 +107,7 @@ export interface RuleViolation {
     | 'EXCEED_MONTHLY_HOURS'    // 月間労働時間超過（正社員）
     | 'EXCEED_WEEKLY_HOURS'     // 週間労働時間超過（パート・最大40h）
     | 'TARGET_HOURS_MISMATCH'   // 常勤の所定労働時間不一致
+    | 'PART_TIME_CONTRACT_HOURS_MISMATCH' // パートの月間契約労働時間不一致
     | 'FIXED_SHIFT_MISMATCH'    // パートの曜日固定シフト不一致
     | 'WEEKLY_DAYS_MISMATCH'    // パートの週勤務日数不一致
     | 'INTERVAL_SHORTAGE'       // 勤務間インターバル不足

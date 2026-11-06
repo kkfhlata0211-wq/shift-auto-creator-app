@@ -69,7 +69,7 @@ export const Header: React.FC<HeaderProps> = ({
                   type="month"
                   value={plan.yearMonth}
                   onChange={(event) => onChangeYearMonth(event.target.value)}
-                  className="min-w-0 bg-transparent text-lg font-black text-blue-900 tracking-tight focus:outline-none focus:ring-2 focus:ring-blue-500 rounded"
+                  className="min-w-0 bg-transparent text-2xl font-black text-blue-900 tracking-tight focus:outline-none focus:ring-2 focus:ring-blue-500 rounded"
                   aria-label="対象年月を選択"
                 />
               </div>
@@ -116,7 +116,7 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-blue-50/70 border border-blue-200 rounded-lg shadow-xs">
             <div className="text-right">
               <div className="text-[10px] font-bold text-blue-800 whitespace-nowrap leading-none">
-                常勤の月所定時間
+                常勤 月所定時間
               </div>
             </div>
             <div className="flex items-center">
@@ -127,7 +127,7 @@ export const Header: React.FC<HeaderProps> = ({
                 step={1}
                 value={plan.targetMonthlyHours ?? 168}
                 onChange={(e) => onUpdateTargetMonthlyHours(Number(e.target.value))}
-                className="w-14 px-1 py-0.5 text-center font-black text-sm text-blue-900 bg-white border border-blue-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-16 px-1 py-0.5 text-center font-black text-sm text-blue-900 bg-white border border-blue-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
               <span className="text-xs font-bold text-blue-800 ml-1">h</span>
             </div>
