@@ -4,6 +4,7 @@
  * - 既存の localStorage データがあれば自動マイグレーション
  */
 import initSqlJs, { Database, SqlJsStatic } from 'sql.js';
+import sqlWasmUrl from 'sql.js/dist/sql-wasm.wasm?url';
 import { MonthlySchedulePlan, Staff, ShiftAssignment, ShiftRequest, DayEvent, ShiftTypeId } from '../types/shift';
 
 const DB_NAME = 'shift_auto_creator_db';
@@ -94,25 +95,57 @@ function createTables(d: Database): void {
     );
   `);
 
+  // requests テーブルのマイグレーションチェック（旧スキーマ: id 単独 PRIMARY KEY の救済）
+  try {
+    const res = d.exec("SELECT sql FROM sqlite_master WHERE type='table' AND name='requests';");
+    if (res.length > 0 && res[0].values.length > 0) {
+      const createSql = (res[0].values[0][0] as string) || '';
+      if (createSql.includes('id TEXT PRIMARY KEY')) {
+        d.run('ALTER TABLE requests RENAME TO requests_old;');
+        d.run(`
+          CREATE TABLE requests (
+            id TEXT NOT NULL,
+            staff_id TEXT NOT NULL,
+            date TEXT NOT NULL,
+            year_month TEXT NOT NULL,
+            requested_shift_id TEXT NOT NULL,
+            is_priority INTEGER NOT NULL DEFAULT 0,
+            note TEXT,
+            PRIMARY KEY (year_month, id)
+          );
+        `);
+        d.run(`
+          INSERT OR IGNORE INTO requests (id, staff_id, date, year_month, requested_shift_id, is_priority, note)
+          SELECT id, staff_id, date, year_month, requested_shift_id, is_priority, note FROM requests_old;
+        `);
+        d.run('DROP TABLE requests_old;');
+      }
+    }
+  } catch (err) {
+    console.warn('[SQLite] requests schema migration:', err);
+  }
+
   d.run(`
     CREATE TABLE IF NOT EXISTS requests (
-      id TEXT PRIMARY KEY,
+      id TEXT NOT NULL,
       staff_id TEXT NOT NULL,
       date TEXT NOT NULL,
       year_month TEXT NOT NULL,
       requested_shift_id TEXT NOT NULL,
       is_priority INTEGER NOT NULL DEFAULT 0,
-      note TEXT
+      note TEXT,
+      PRIMARY KEY (year_month, id)
     );
   `);
 
   d.run(`
     CREATE TABLE IF NOT EXISTS events (
-      date TEXT PRIMARY KEY,
+      date TEXT NOT NULL,
       year_month TEXT NOT NULL,
       title TEXT NOT NULL,
       color TEXT,
-      notes TEXT
+      notes TEXT,
+      PRIMARY KEY (year_month, date)
     );
   `);
 }
@@ -123,7 +156,7 @@ export async function initDatabase(): Promise<void> {
 
   initPromise = (async () => {
     SQL = await initSqlJs({
-      locateFile: (file: string) => `${import.meta.env.BASE_URL}${file}`,
+      locateFile: () => sqlWasmUrl,
     });
 
     const existingBytes = await loadDbBytesFromIDB();
@@ -205,11 +238,12 @@ export async function savePlan(plan: MonthlySchedulePlan): Promise<void> {
 
     // 4. リクエスト（当月分を差し替え）
     d.run('DELETE FROM requests WHERE year_month = ?;', [plan.yearMonth]);
-    plan.requests.forEach((r) => {
+    plan.requests.forEach((r, idx) => {
+      const reqId = r.id || `req_${plan.yearMonth}_${idx}`;
       d.run(
-        `INSERT INTO requests (id, staff_id, date, year_month, requested_shift_id, is_priority, note)
+        `INSERT OR REPLACE INTO requests (id, staff_id, date, year_month, requested_shift_id, is_priority, note)
          VALUES (?, ?, ?, ?, ?, ?, ?);`,
-        [r.id, r.staffId, r.date, plan.yearMonth, r.requestedShiftId, r.isPriority ? 1 : 0, r.note ?? null]
+        [reqId, r.staffId, r.date, plan.yearMonth, r.requestedShiftId, r.isPriority ? 1 : 0, r.note ?? null]
       );
     });
 
@@ -217,7 +251,7 @@ export async function savePlan(plan: MonthlySchedulePlan): Promise<void> {
     d.run('DELETE FROM events WHERE year_month = ?;', [plan.yearMonth]);
     Object.values(plan.events).forEach((e) => {
       d.run(
-        `INSERT INTO events (date, year_month, title, color, notes)
+        `INSERT OR REPLACE INTO events (date, year_month, title, color, notes)
          VALUES (?, ?, ?, ?, ?);`,
         [e.date, plan.yearMonth, e.title, e.color ?? null, e.notes ?? null]
       );
