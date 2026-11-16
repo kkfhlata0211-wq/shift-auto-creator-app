@@ -768,7 +768,8 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
                   勤務区分を選択
                 </label>
                 <div className="grid grid-cols-2 gap-2">
-                  {Object.values(plan.shiftTypes).map((st) => {
+                  {summaryShiftIds.map((shiftId) => {
+                    const st = plan.shiftTypes[shiftId];
                     const isSelected = selectedShiftId === st.id;
                     return (
                       <button

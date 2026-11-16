@@ -192,7 +192,7 @@ export const Header: React.FC<HeaderProps> = ({
           {/* リセット */}
           <button
             onClick={onReset}
-            title="手動で設定されたシフト割当をクリア"
+            title="シフト割当をクリア（スタッフ・設定・希望・行事は保持）"
             className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
           >
             <RotateCcw className="w-4 h-4" />

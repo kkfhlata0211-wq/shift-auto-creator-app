@@ -8,31 +8,68 @@ import { MonthlySchedulePlan, ShiftTypeId, Staff, ConstraintRules, DayEvent } fr
 import { createInitialSchedule } from './mock/initialData';
 import { validateSchedule } from './engine/validator';
 import { generateAutomatedSchedule } from './engine/generator';
-import { loadPlansFromStorage, savePlansToStorage } from './utils/storage';
+import { initDatabase, loadPlans, savePlans, migrateFromLocalStorage } from './utils/database';
 
 export function App() {
-  const [scheduleState, setScheduleState] = useState(() => {
-    const savedPlans = loadPlansFromStorage();
-    const plans = Object.keys(savedPlans).length
-      ? savedPlans
-      : { '2026-11': createInitialSchedule('2026-11') };
-
-    Object.values(plans).forEach((saved) => {
-      if (saved.shiftTypes?.HOLIDAY) {
-        saved.shiftTypes.HOLIDAY.shortName = '休';
-      }
-      if (saved.staffList) {
-        saved.staffList = saved.staffList.map((staff) => ({
-          ...staff,
-          employmentType: (staff.employmentType as string) === 'SHORT_TIME' ? 'PART_TIME' : staff.employmentType,
-          weeklyMaxHours: staff.employmentType === 'PART_TIME' ? (staff.weeklyMaxHours || 40) : staff.weeklyMaxHours,
-        }));
-      }
-    });
-
-    const selectedYearMonth = Object.keys(plans).sort().pop()!;
-    return { plans, selectedYearMonth };
+  const [isInitialized, setIsInitialized] = useState(false);
+  const [scheduleState, setScheduleState] = useState<{
+    plans: Record<string, MonthlySchedulePlan>;
+    selectedYearMonth: string;
+  }>({
+    plans: {},
+    selectedYearMonth: '2026-11',
   });
+
+  // SQLite データベースの非同期初期化とロード
+  useEffect(() => {
+    let isMounted = true;
+
+    async function initialize() {
+      try {
+        await initDatabase();
+        await migrateFromLocalStorage();
+        const savedPlans = loadPlans();
+
+        const plans = Object.keys(savedPlans).length
+          ? savedPlans
+          : { '2026-11': createInitialSchedule('2026-11') };
+
+        Object.values(plans).forEach((saved) => {
+          if (saved.shiftTypes?.HOLIDAY) {
+            saved.shiftTypes.HOLIDAY.shortName = '休';
+          }
+          if (saved.staffList) {
+            saved.staffList = saved.staffList.map((staff) => ({
+              ...staff,
+              employmentType: (staff.employmentType as string) === 'SHORT_TIME' ? 'PART_TIME' : staff.employmentType,
+              weeklyMaxHours: staff.employmentType === 'PART_TIME' ? (staff.weeklyMaxHours || 40) : staff.weeklyMaxHours,
+            }));
+          }
+        });
+
+        // 初期データが未保存の場合は保存
+        if (!Object.keys(savedPlans).length) {
+          await savePlans(plans);
+        }
+
+        const selectedYearMonth = Object.keys(plans).sort().pop() || '2026-11';
+
+        if (isMounted) {
+          setScheduleState({ plans, selectedYearMonth });
+          setIsInitialized(true);
+        }
+      } catch (error) {
+        console.error('データベースの初期化に失敗しました:', error);
+      }
+    }
+
+    initialize();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   const plan = scheduleState.plans[scheduleState.selectedYearMonth];
   const setPlan = (update: MonthlySchedulePlan | ((previous: MonthlySchedulePlan) => MonthlySchedulePlan)) => {
     setScheduleState((previous) => {
@@ -49,13 +86,25 @@ export function App() {
   const [isStaffModalOpen, setIsStaffModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
 
-  // 変更があるたびに LocalStorage に自動保存
+  // 変更があるたびに SQLite (IndexedDB) に自動保存
   useEffect(() => {
-    savePlansToStorage(scheduleState.plans);
-  }, [scheduleState.plans]);
+    if (!isInitialized) return;
+    savePlans(scheduleState.plans).catch((err) => {
+      console.error('シフトプランの保存に失敗しました:', err);
+    });
+  }, [scheduleState.plans, isInitialized]);
 
   // リアルタイムに制約ルール違反・警告を再計算
   const validation = useMemo(() => {
+    if (!plan) {
+      return {
+        violations: [],
+        violationsByStaffAndDate: {},
+        violationsByDate: {},
+        staffHoursSummary: {},
+        dailyCoverageSummary: {},
+      };
+    }
     return validateSchedule(plan);
   }, [plan]);
 
@@ -202,9 +251,12 @@ export function App() {
 
   // リセット
   const handleReset = () => {
-    if (window.confirm('シフトの自動割当をクリアして初期状態に戻しますか？（確定ロックも解除されます）')) {
-      const initial = createInitialSchedule(plan.yearMonth);
-      setPlan(initial);
+    if (window.confirm('シフト割当をすべてクリアしますか？（確定ロックは解除されます。スタッフ・設定・希望・行事は保持されます）')) {
+      setPlan((previous) => ({
+        ...previous,
+        assignments: {},
+        updatedAt: new Date().toISOString(),
+      }));
     }
   };
 
@@ -219,6 +271,15 @@ export function App() {
       alert('無効なシフトデータファイルです。');
     }
   };
+
+  if (!isInitialized || !plan) {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen bg-slate-100 text-slate-600 gap-3">
+        <div className="w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+        <p className="text-sm font-medium">データベース（SQLite）を読み込み中...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-slate-100">
