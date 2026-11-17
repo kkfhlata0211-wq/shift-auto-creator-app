@@ -12,6 +12,7 @@ import { initDatabase, loadPlans, savePlans, migrateFromLocalStorage } from './u
 
 export function App() {
   const [isInitialized, setIsInitialized] = useState(false);
+  const [initializationError, setInitializationError] = useState<string | null>(null);
   const [scheduleState, setScheduleState] = useState<{
     plans: Record<string, MonthlySchedulePlan>;
     selectedYearMonth: string;
@@ -60,6 +61,9 @@ export function App() {
         }
       } catch (error) {
         console.error('データベースの初期化に失敗しました:', error);
+        if (isMounted) {
+          setInitializationError(error instanceof Error ? error.message : String(error));
+        }
       }
     }
 
@@ -271,6 +275,23 @@ export function App() {
       alert('無効なシフトデータファイルです。');
     }
   };
+
+  if (initializationError) {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen bg-slate-100 text-slate-700 gap-3 p-6 text-center">
+        <p className="text-lg font-bold">データベースの読み込みに失敗しました</p>
+        <p className="text-sm">ページを再読み込みしてください。問題が続く場合は、次のエラー内容を共有してください。</p>
+        <pre className="max-w-2xl overflow-auto rounded bg-white p-3 text-left text-xs">{initializationError}</pre>
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white hover:bg-indigo-700"
+        >
+          再読み込み
+        </button>
+      </div>
+    );
+  }
 
   if (!isInitialized || !plan) {
     return (
