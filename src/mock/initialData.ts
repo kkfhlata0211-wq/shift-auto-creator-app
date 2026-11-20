@@ -97,8 +97,8 @@ export const DEFAULT_SHIFT_TYPES: Record<ShiftTypeId, ShiftType> = {
 export const INITIAL_STAFF: Staff[] = [
   {
     id: 'st_01',
-    name: '佐藤 健一',
-    role: '看護師長',
+    name: '正社員①',
+    role: '',
     employmentType: 'FULL_TIME',
     canNightShift: true,
     monthlyMaxHours: 168,
@@ -108,19 +108,19 @@ export const INITIAL_STAFF: Staff[] = [
   },
   {
     id: 'st_02',
-    name: '鈴木 恵美',
-    role: '主任看護師',
+    name: '正社員②',
+    role: '',
     employmentType: 'FULL_TIME',
     canNightShift: true,
     monthlyMaxHours: 168,
     minHolidaysPerMonth: 9,
     skillLevel: 4,
-    ngStaffIds: ['st_06'], // 高橋とNGペア
+    ngStaffIds: ['st_06'], // パート①とNGペア
   },
   {
     id: 'st_03',
-    name: '高橋 雄介',
-    role: '介護福祉士',
+    name: '正社員③',
+    role: '',
     employmentType: 'FULL_TIME',
     canNightShift: true,
     monthlyMaxHours: 168,
@@ -130,8 +130,8 @@ export const INITIAL_STAFF: Staff[] = [
   },
   {
     id: 'st_04',
-    name: '田中 美穂',
-    role: '看護師',
+    name: '正社員④',
+    role: '',
     employmentType: 'FULL_TIME',
     canNightShift: false, // 日勤帯のみ
     monthlyMaxHours: 168,
@@ -141,8 +141,8 @@ export const INITIAL_STAFF: Staff[] = [
   },
   {
     id: 'st_05',
-    name: '渡辺 翔太',
-    role: '介護福祉士',
+    name: '正社員⑤',
+    role: '',
     employmentType: 'FULL_TIME',
     canNightShift: true,
     monthlyMaxHours: 168,
@@ -152,8 +152,8 @@ export const INITIAL_STAFF: Staff[] = [
   },
   {
     id: 'st_06',
-    name: '伊藤 綾子',
-    role: '介護スタッフ',
+    name: 'パート①',
+    role: '',
     employmentType: 'PART_TIME',
     canNightShift: false,
     monthlyMaxHours: 120,
@@ -162,13 +162,13 @@ export const INITIAL_STAFF: Staff[] = [
     fixedShiftType: 'DAY', // 日勤固定パート
     minHolidaysPerMonth: 12,
     skillLevel: 2,
-    ngStaffIds: ['st_02'], // 鈴木とNGペア
+    ngStaffIds: ['st_02'], // 正社員②とNGペア
     allowedWeeklyWorkDays: [3, 4], // 週3日・週4日選択（多い方の週4日基準）
   },
   {
     id: 'st_07',
-    name: '小林 誠',
-    role: '介護助手',
+    name: 'パート②',
+    role: '',
     employmentType: 'PART_TIME',
     canNightShift: false,
     monthlyMaxHours: 80,
@@ -181,8 +181,8 @@ export const INITIAL_STAFF: Staff[] = [
   },
   {
     id: 'st_08',
-    name: '加藤 由紀',
-    role: '看護師',
+    name: '正社員⑥',
+    role: '',
     employmentType: 'FULL_TIME',
     canNightShift: true,
     monthlyMaxHours: 168,

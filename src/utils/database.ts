@@ -70,9 +70,9 @@ function createTables(d: Database): void {
       role TEXT NOT NULL,
       employment_type TEXT NOT NULL,
       can_night_shift INTEGER NOT NULL DEFAULT 0,
-      monthly_max_hours REAL NOT NULL DEFAULT 168,
+      monthly_max_hours REAL,
       weekly_max_hours REAL,
-      daily_work_hours REAL NOT NULL DEFAULT 8,
+      daily_work_hours REAL,
       min_holidays_per_month INTEGER NOT NULL DEFAULT 9,
       skill_level INTEGER NOT NULL DEFAULT 3,
       ng_staff_ids_json TEXT NOT NULL DEFAULT '[]',
@@ -83,12 +83,51 @@ function createTables(d: Database): void {
       sort_order INTEGER NOT NULL DEFAULT 0
     );
   `);
-  const staffColumns = d.exec('PRAGMA table_info(staff);');
-  if (
-    staffColumns.length > 0 &&
-    !staffColumns[0].values.some((row) => row[1] === 'daily_work_hours')
-  ) {
+  let staffColumns = d.exec('PRAGMA table_info(staff);')[0]?.values ?? [];
+  if (!staffColumns.some((row) => row[1] === 'daily_work_hours')) {
     d.run('ALTER TABLE staff ADD COLUMN daily_work_hours REAL NOT NULL DEFAULT 8;');
+    staffColumns = d.exec('PRAGMA table_info(staff);')[0]?.values ?? [];
+  }
+  if (!staffColumns.some((row) => row[1] === 'monthly_max_hours')) {
+    d.run('ALTER TABLE staff ADD COLUMN monthly_max_hours REAL NOT NULL DEFAULT 168;');
+    staffColumns = d.exec('PRAGMA table_info(staff);')[0]?.values ?? [];
+  }
+  const monthlyMaxHoursColumn = staffColumns.find((row) => row[1] === 'monthly_max_hours');
+  const dailyWorkHoursColumn = staffColumns.find((row) => row[1] === 'daily_work_hours');
+  if (
+    (monthlyMaxHoursColumn?.[3] as number) === 1 ||
+    (dailyWorkHoursColumn?.[3] as number) === 1
+  ) {
+    d.run('ALTER TABLE staff RENAME TO staff_old;');
+    d.run(`
+      CREATE TABLE staff (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        role TEXT NOT NULL,
+        employment_type TEXT NOT NULL,
+        can_night_shift INTEGER NOT NULL DEFAULT 0,
+        monthly_max_hours REAL,
+        weekly_max_hours REAL,
+        daily_work_hours REAL,
+        min_holidays_per_month INTEGER NOT NULL DEFAULT 9,
+        skill_level INTEGER NOT NULL DEFAULT 3,
+        ng_staff_ids_json TEXT NOT NULL DEFAULT '[]',
+        preferred_shift_types_json TEXT,
+        fixed_shift_type TEXT,
+        fixed_day_shifts_json TEXT,
+        allowed_weekly_work_days_json TEXT,
+        sort_order INTEGER NOT NULL DEFAULT 0
+      );
+    `);
+    d.run(`
+      INSERT INTO staff
+      SELECT id, name, role, employment_type, can_night_shift, monthly_max_hours,
+             weekly_max_hours, daily_work_hours, min_holidays_per_month, skill_level,
+             ng_staff_ids_json, preferred_shift_types_json, fixed_shift_type,
+             fixed_day_shifts_json, allowed_weekly_work_days_json, sort_order
+      FROM staff_old;
+    `);
+    d.run('DROP TABLE staff_old;');
   }
 
   d.run(`
@@ -222,8 +261,8 @@ export async function savePlan(plan: MonthlySchedulePlan): Promise<void> {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
         [
           s.id, s.name, s.role, s.employmentType,
-          s.canNightShift ? 1 : 0, s.monthlyMaxHours,
-          s.weeklyMaxHours ?? null, s.dailyWorkHours ?? 8, s.minHolidaysPerMonth,
+          s.canNightShift ? 1 : 0, s.monthlyMaxHours ?? null,
+          s.weeklyMaxHours ?? null, s.dailyWorkHours ?? null, s.minHolidaysPerMonth,
           s.skillLevel, JSON.stringify(s.ngStaffIds),
           s.preferredShiftTypes ? JSON.stringify(s.preferredShiftTypes) : null,
           s.fixedShiftType ?? null,
@@ -305,9 +344,9 @@ export function loadPlans(): Record<string, MonthlySchedulePlan> {
           role: sGet('role') as string,
           employmentType: sGet('employment_type') as Staff['employmentType'],
           canNightShift: (sGet('can_night_shift') as number) === 1,
-          monthlyMaxHours: sGet('monthly_max_hours') as number,
+          monthlyMaxHours: (sGet('monthly_max_hours') as number | null) ?? undefined,
           weeklyMaxHours: sGet('weekly_max_hours') as number | undefined,
-          dailyWorkHours: sGet('daily_work_hours') as number,
+          dailyWorkHours: (sGet('daily_work_hours') as number | null) ?? undefined,
           minHolidaysPerMonth: sGet('min_holidays_per_month') as number,
           skillLevel: sGet('skill_level') as Staff['skillLevel'],
           ngStaffIds: JSON.parse(sGet('ng_staff_ids_json') as string),

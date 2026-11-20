@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X, UserPlus, Trash2, Edit2, Check, Moon, Star, Users, Calendar } from 'lucide-react';
+import { X, UserPlus, Trash2, Edit2, Check, Moon, Users, Calendar } from 'lucide-react';
 import { Staff, EmploymentType, ShiftTypeId } from '../types/shift';
 import { DEFAULT_PART_TIME_DAILY_WORK_HOURS } from '../engine/partTimeRules';
 
@@ -27,7 +27,7 @@ export const StaffModal: React.FC<StaffModalProps> = ({
   const [formData, setFormData] = useState<Staff>({
     id: '',
     name: '',
-    role: '介護福祉士',
+    role: '',
     employmentType: 'FULL_TIME',
     canNightShift: true,
     monthlyMaxHours: 168,
@@ -40,10 +40,7 @@ export const StaffModal: React.FC<StaffModalProps> = ({
 
   const handleStartEdit = (staff: Staff) => {
     setEditingStaffId(staff.id);
-    setFormData({
-      ...staff,
-      dailyWorkHours: staff.dailyWorkHours ?? DEFAULT_PART_TIME_DAILY_WORK_HOURS,
-    });
+    setFormData({ ...staff });
     setIsAdding(false);
   };
 
@@ -53,7 +50,7 @@ export const StaffModal: React.FC<StaffModalProps> = ({
     setFormData({
       id: `st_${Date.now()}`,
       name: '',
-      role: '看護師',
+      role: '',
       employmentType: 'FULL_TIME',
       canNightShift: false,
       monthlyMaxHours: 168,
@@ -113,7 +110,7 @@ export const StaffModal: React.FC<StaffModalProps> = ({
         <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
           <div className="flex items-center gap-2">
             <Users className="w-5 h-5 text-blue-600" />
-            <h2 className="text-lg font-bold text-slate-800">スタッフ管理・スキル・NGペア設定</h2>
+            <h2 className="text-lg font-bold text-slate-800">スタッフ管理・NGペア設定</h2>
           </div>
           <button
             onClick={onClose}
@@ -176,7 +173,7 @@ export const StaffModal: React.FC<StaffModalProps> = ({
                     type="text"
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    placeholder="例: 佐藤 健一"
+                    placeholder="例: 正社員①"
                     className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
@@ -205,7 +202,7 @@ export const StaffModal: React.FC<StaffModalProps> = ({
                         weeklyMaxHours: newType === 'PART_TIME' ? 40 : undefined,
                         dailyWorkHours:
                           newType === 'PART_TIME'
-                            ? formData.dailyWorkHours ?? DEFAULT_PART_TIME_DAILY_WORK_HOURS
+                            ? formData.dailyWorkHours
                             : formData.dailyWorkHours,
                       });
                     }}
@@ -213,26 +210,6 @@ export const StaffModal: React.FC<StaffModalProps> = ({
                   >
                     <option value="FULL_TIME">正社員 (常勤)</option>
                     <option value="PART_TIME">パート (時間・勤務日数管理)</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-slate-700 font-semibold mb-1">スキル評価 (1〜5)</label>
-                  <select
-                    value={formData.skillLevel}
-                    onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        skillLevel: Number(e.target.value) as 1 | 2 | 3 | 4 | 5,
-                      })
-                    }
-                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value={1}>★☆☆☆☆ (新人・研修)</option>
-                    <option value={2}>★★☆☆☆ (初級)</option>
-                    <option value={3}>★★★☆☆ (標準・単独可)</option>
-                    <option value={4}>★★★★☆ (中堅・リーダー)</option>
-                    <option value={5}>★★★★★ (師長・ベテラン)</option>
                   </select>
                 </div>
 
@@ -244,18 +221,19 @@ export const StaffModal: React.FC<StaffModalProps> = ({
                     <input
                       type="number"
                       max={24}
-                      min={0.5}
+                      min={0}
                       step={0.5}
-                      value={formData.dailyWorkHours ?? DEFAULT_PART_TIME_DAILY_WORK_HOURS}
-                      onChange={(e) =>
+                      value={formData.dailyWorkHours ?? ''}
+                      onChange={(e) => {
+                        const value = e.target.value;
                         setFormData({
                           ...formData,
-                          dailyWorkHours: Math.min(
-                            24,
-                            Math.max(0.5, Number(e.target.value) || DEFAULT_PART_TIME_DAILY_WORK_HOURS)
-                          ),
-                        })
-                      }
+                          dailyWorkHours:
+                            value === ''
+                              ? undefined
+                              : Math.min(24, Math.max(0, Number(value))),
+                        });
+                      }}
                       className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-bold text-blue-700"
                     />
                     <span className="text-[10px] text-slate-400 mt-1 block">
@@ -267,9 +245,16 @@ export const StaffModal: React.FC<StaffModalProps> = ({
                     <label className="block text-slate-700 font-semibold mb-1">月間上限労働時間 (h)</label>
                     <input
                       type="number"
-                      value={formData.monthlyMaxHours}
+                      min={0}
+                      value={formData.monthlyMaxHours ?? ''}
                       onChange={(e) =>
-                        setFormData({ ...formData, monthlyMaxHours: Number(e.target.value) })
+                        setFormData({
+                          ...formData,
+                          monthlyMaxHours:
+                            e.target.value === ''
+                              ? undefined
+                              : Math.max(0, Number(e.target.value)),
+                        })
                       }
                       className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-bold"
                     />
@@ -485,7 +470,6 @@ export const StaffModal: React.FC<StaffModalProps> = ({
                 <tr>
                   <th className="px-4 py-3">氏名</th>
                   <th className="px-3 py-3">役職 / 雇用</th>
-                  <th className="px-3 py-3 text-center">スキル</th>
                   <th className="px-3 py-3 text-center">夜勤</th>
                   <th className="px-3 py-3 text-center">契約 / 上限時間</th>
                   <th className="px-3 py-3">NGペア</th>
@@ -529,13 +513,6 @@ export const StaffModal: React.FC<StaffModalProps> = ({
                         </div>
                       </td>
                       <td className="px-3 py-3 text-center">
-                        <div className="flex items-center justify-center gap-0.5">
-                          {Array.from({ length: staff.skillLevel }).map((_, i) => (
-                            <Star key={i} className="w-3 h-3 fill-amber-400 text-amber-400" />
-                          ))}
-                        </div>
-                      </td>
-                      <td className="px-3 py-3 text-center">
                         {staff.canNightShift ? (
                           <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-purple-100 text-purple-700">
                             夜勤可
@@ -549,7 +526,7 @@ export const StaffModal: React.FC<StaffModalProps> = ({
                           <div>
                             <div className="text-[10px] text-blue-700 font-semibold">
                               1日の労働時間
-                              <div>{staff.dailyWorkHours ?? DEFAULT_PART_TIME_DAILY_WORK_HOURS}h</div>
+                              <div>{staff.dailyWorkHours === undefined ? '-' : `${staff.dailyWorkHours}h`}</div>
                             </div>
                             {staff.allowedWeeklyWorkDays && staff.allowedWeeklyWorkDays.length > 0 && (
                               <div className="text-[10px] text-blue-600 font-semibold mt-0.5">
@@ -558,7 +535,7 @@ export const StaffModal: React.FC<StaffModalProps> = ({
                             )}
                           </div>
                         ) : (
-                          <span>月 {staff.monthlyMaxHours}h</span>
+                          <span>{staff.monthlyMaxHours === undefined ? '-' : `月 ${staff.monthlyMaxHours}h`}</span>
                         )}
                       </td>
                       <td className="px-3 py-3">

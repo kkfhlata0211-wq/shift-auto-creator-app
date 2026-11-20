@@ -34,7 +34,10 @@ export function getPartTimeWeeklyWorkDaysTarget(staff: Staff): number | undefine
   // 未設定の場合: 1日の契約時間と月間契約時間から逆算した週日数をフォールバックとする
   if (staff.employmentType === 'PART_TIME') {
     const dailyHours = getPartTimeDailyWorkHours(staff);
-    const estimatedDaysPerMonth = Math.round((staff.monthlyMaxHours || 80) / dailyHours);
+    const estimatedDaysPerMonth =
+      staff.monthlyMaxHours !== undefined && staff.monthlyMaxHours > 0
+        ? Math.round(staff.monthlyMaxHours / dailyHours)
+        : 0;
     return Math.min(5, Math.max(1, Math.round(estimatedDaysPerMonth / 4.3)));
   }
   return undefined;

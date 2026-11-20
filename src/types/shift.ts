@@ -30,7 +30,7 @@ export interface Staff {
   role: string;                     // '看護師', '介護福祉士', '介護助手' 等
   employmentType: EmploymentType;   // 正社員, パート, 時短パート
   canNightShift: boolean;           // 夜勤可否フラグ
-  monthlyMaxHours: number;          // 正社員: 月の契約・法定労働時間上限（変形労働制）
+  monthlyMaxHours?: number;         // 正社員: 月の契約・法定労働時間上限（変形労働制）
   weeklyMaxHours?: number;          // 旧データ互換用。パートの週上限は40h固定
   dailyWorkHours?: number;          // パート: 1日の契約労働時間
   minHolidaysPerMonth: number;      // 月間必須公休日数（例: 8日〜10日）

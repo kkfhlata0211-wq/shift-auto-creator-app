@@ -8,7 +8,6 @@ import { MonthlySchedulePlan, ShiftTypeId, Staff, ConstraintRules, DayEvent } fr
 import { createInitialSchedule } from './mock/initialData';
 import { validateSchedule } from './engine/validator';
 import { generateAutomatedSchedule } from './engine/generator';
-import { DEFAULT_PART_TIME_DAILY_WORK_HOURS } from './engine/partTimeRules';
 import { initDatabase, loadPlans, savePlans, migrateFromLocalStorage } from './utils/database';
 import { getPreviousYearMonth } from './utils/dateUtils';
 
@@ -46,10 +45,7 @@ export function App() {
               ...staff,
               employmentType: (staff.employmentType as string) === 'SHORT_TIME' ? 'PART_TIME' : staff.employmentType,
               weeklyMaxHours: staff.employmentType === 'PART_TIME' ? 40 : staff.weeklyMaxHours,
-              dailyWorkHours:
-                staff.employmentType === 'PART_TIME'
-                  ? staff.dailyWorkHours ?? DEFAULT_PART_TIME_DAILY_WORK_HOURS
-                  : staff.dailyWorkHours,
+              dailyWorkHours: staff.dailyWorkHours,
             }));
           }
         });
@@ -245,7 +241,7 @@ export function App() {
           preferredShiftTypes: staff.preferredShiftTypes ? [...staff.preferredShiftTypes] : undefined,
           fixedDayShifts: staff.fixedDayShifts ? { ...staff.fixedDayShifts } : undefined,
           allowedWeeklyWorkDays: staff.allowedWeeklyWorkDays ? [...staff.allowedWeeklyWorkDays] : undefined,
-          dailyWorkHours: staff.dailyWorkHours ?? DEFAULT_PART_TIME_DAILY_WORK_HOURS,
+          dailyWorkHours: staff.dailyWorkHours,
         })),
         shiftTypes: { ...currentPlan.shiftTypes },
         assignments: {},

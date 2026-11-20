@@ -91,11 +91,14 @@ export function generateAutomatedSchedule(
     staffDayShiftCounts[s.id] = { EARLY: 0, DAY: 0, LATE: 0 };
 
     if (s.employmentType === 'FULL_TIME') {
-      const targetHours = plan.targetMonthlyHours || s.monthlyMaxHours;
+      const targetHours =
+        plan.targetMonthlyHours && plan.targetMonthlyHours > 0
+          ? plan.targetMonthlyHours
+          : (s.monthlyMaxHours ?? 168);
       const targetWorkDays = Math.round(targetHours / 8);
       targetHolidaysMap[s.id] = Math.max(s.minHolidaysPerMonth, totalDays - targetWorkDays);
     } else {
-      const targetWorkDays = Math.round(s.monthlyMaxHours / 8);
+      const targetWorkDays = Math.round((s.monthlyMaxHours ?? 168) / 8);
       targetHolidaysMap[s.id] = Math.max(s.minHolidaysPerMonth, totalDays - targetWorkDays);
     }
   });
@@ -516,8 +519,9 @@ export function generateAutomatedSchedule(
           }
         }
       } else {
-        const hoursRemaining = staff.monthlyMaxHours - staffWorkHours[staff.id];
-        if (hoursRemaining < 8) {
+        const monthlyMaxHours = staff.monthlyMaxHours ?? 168;
+        const hoursRemaining = monthlyMaxHours - staffWorkHours[staff.id];
+        if (staff.monthlyMaxHours !== undefined && staff.monthlyMaxHours > 0 && hoursRemaining < 8) {
           if (!allowLimitOverrides) return -9999;
           score -= 500 + (8 - hoursRemaining) * 20;
         }
@@ -558,7 +562,10 @@ export function generateAutomatedSchedule(
         }
 
         // 月の所定労働時間の進度ペース（前倒し勤務の防止・月全体への均等化）
-        const targetHours = plan.targetMonthlyHours || staff.monthlyMaxHours;
+        const targetHours =
+          plan.targetMonthlyHours && plan.targetMonthlyHours > 0
+            ? plan.targetMonthlyHours
+            : (staff.monthlyMaxHours ?? 168);
         const expectedHoursToDate = targetHours * dayProgress;
         const hourDiff = (staffWorkHours[staff.id] + 8) - expectedHoursToDate;
 
@@ -674,7 +681,11 @@ export function generateAutomatedSchedule(
       );
 
       const isPartTime = staff.employmentType === 'PART_TIME';
-      const monthlyOver = !isPartTime && staff.monthlyMaxHours - staffWorkHours[staff.id] < 8;
+      const monthlyOver =
+        !isPartTime &&
+        staff.monthlyMaxHours !== undefined &&
+        staff.monthlyMaxHours > 0 &&
+        staff.monthlyMaxHours - staffWorkHours[staff.id] < 8;
 
       // 正社員の週勤務日数
       const fullTimeDaysInWeek = !isPartTime
@@ -682,7 +693,11 @@ export function generateAutomatedSchedule(
         : 0;
 
       // 正社員の所定労働時間の進度管理
-      const targetHours = !isPartTime ? (plan.targetMonthlyHours || staff.monthlyMaxHours) : 0;
+      const targetHours = !isPartTime
+        ? (plan.targetMonthlyHours && plan.targetMonthlyHours > 0
+            ? plan.targetMonthlyHours
+            : (staff.monthlyMaxHours ?? 168))
+        : 0;
       const remainingDays = totalDays - (dayIndex + 1);
       const remainingPotentialHours = remainingDays * 8;
       const hoursNeeded = targetHours - staffWorkHours[staff.id];
@@ -907,7 +922,10 @@ export function generateAutomatedSchedule(
   const fullTimeStaff = plan.staffList.filter((s) => s.employmentType === 'FULL_TIME');
 
   fullTimeStaff.forEach((staff) => {
-    const targetHours = plan.targetMonthlyHours || staff.monthlyMaxHours;
+    const targetHours =
+      plan.targetMonthlyHours && plan.targetMonthlyHours > 0
+        ? plan.targetMonthlyHours
+        : (staff.monthlyMaxHours ?? 168);
     let currentHours = staffWorkHours[staff.id] || 0;
     const diff = targetHours - currentHours;
 

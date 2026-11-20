@@ -280,7 +280,11 @@ export function validateSchedule(
     // 正社員のみ所定労働時間（targetMonthlyHours）の合致チェックを行う
 
     const hasWeeklyDaySetting = isPartTime && staff.allowedWeeklyWorkDays && staff.allowedWeeklyWorkDays.length > 0;
-    const isMonthlyOver = !hasWeeklyDaySetting && totalWorkHours > staff.monthlyMaxHours;
+    const isMonthlyOver =
+      !hasWeeklyDaySetting &&
+      staff.monthlyMaxHours !== undefined &&
+      staff.monthlyMaxHours > 0 &&
+      totalWorkHours > staff.monthlyMaxHours;
     if (isMonthlyOver && !isPartTime) {
       addViolation({
         id: `v_hours_${staff.id}`,
@@ -295,7 +299,7 @@ export function validateSchedule(
 
     staffHoursSummary[staff.id] = {
       totalHours: totalWorkHours,
-      maxHours: staff.monthlyMaxHours,
+      maxHours: staff.monthlyMaxHours ?? 168,
       isOver: isPartTime ? isWeeklyOver : (isMonthlyOver || targetHoursMismatch),
       weeklyHours,
       weeklyMaxHours: isPartTime ? weeklyMax : undefined,
