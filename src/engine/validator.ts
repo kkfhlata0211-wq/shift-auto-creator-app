@@ -1,12 +1,5 @@
 import { MonthlySchedulePlan, RuleViolation, ShiftTypeId } from '../types/shift';
 import { getDaysInMonth } from '../utils/dateUtils';
-import {
-  getPartTimeWeekTargetRange,
-  getPartTimeWeeklyWorkDaysTarget,
-  getPreviousMonthWorkStats,
-  getStaffShiftWorkHours,
-  PART_TIME_WEEKLY_HOURS_LIMIT,
-} from './partTimeRules';
 
 export interface ValidationSummary {
   violations: RuleViolation[];
@@ -39,7 +32,7 @@ export interface ValidationSummary {
 
 export function validateSchedule(
   plan: MonthlySchedulePlan,
-  previousMonthPlan?: MonthlySchedulePlan
+  _previousMonthPlan?: MonthlySchedulePlan
 ): ValidationSummary {
   const violations: RuleViolation[] = [];
   const violationsByStaffAndDate: Record<string, RuleViolation[]> = {};
@@ -49,11 +42,6 @@ export function validateSchedule(
 
   const days = getDaysInMonth(plan.yearMonth);
   const staffMap = new Map(plan.staffList.map((s) => [s.id, s]));
-  const previousMonthStats = getPreviousMonthWorkStats(
-    plan.yearMonth,
-    plan.staffList,
-    previousMonthPlan
-  );
 
   const addViolation = (violation: RuleViolation) => {
     violations.push(violation);
@@ -82,9 +70,8 @@ export function validateSchedule(
 
       // 労働時間の積算（有休も労務計算上は出勤時間として積算）
       if (shift?.isWork) {
-        const workHours = getStaffShiftWorkHours(staff, shift);
-        totalWorkHours += workHours;
-        weeklyHours[day.weekIndex] = (weeklyHours[day.weekIndex] || 0) + workHours;
+        totalWorkHours += shift.workHours;
+        weeklyHours[day.weekIndex] = (weeklyHours[day.weekIndex] || 0) + shift.workHours;
         weeklyWorkDaysCount[day.weekIndex] = (weeklyWorkDaysCount[day.weekIndex] || 0) + 1;
       }
 
@@ -188,24 +175,24 @@ export function validateSchedule(
       }
     });
 
-    if (previousMonthStats[staff.id]) {
-      weeklyHours[0] = (weeklyHours[0] || 0) + previousMonthStats[staff.id].workHours;
-      weeklyWorkDaysCount[0] =
-        (weeklyWorkDaysCount[0] || 0) + previousMonthStats[staff.id].workDays;
-    }
-
-    // パートは週40時間を上限とし、週の勤務日数は選択された最大日数を基準に確認する
-    // 正社員は月の所定労働時間と変形労働制上限を確認する
-    const weeklyMax = PART_TIME_WEEKLY_HOURS_LIMIT;
+    // パート: 週単位（最大40h）のチェック & 週の勤務日数チェック
+    // 正社員: 月の所定労働時間チェック & 変形労働制上限チェック
+    const weeklyMax = staff.weeklyMaxHours || 40;
     const allowedWeeklyWorkDays = staff.allowedWeeklyWorkDays;
-    const targetWeeklyWorkDays = getPartTimeWeeklyWorkDaysTarget(staff);
+    const isWeeklyWorkDaysMatched = (weekIndex: number): boolean => {
+      const weekDays = days.filter((day) => day.weekIndex === weekIndex);
+      return (
+        weekDays.length >= 5 &&
+        !!allowedWeeklyWorkDays?.includes(weeklyWorkDaysCount[weekIndex] || 0)
+      );
+    };
     let maxWeekHours = 0;
     let isWeeklyOver = false;
 
     Object.entries(weeklyHours).forEach(([wIdx, hours]) => {
       if (hours > maxWeekHours) maxWeekHours = hours;
       const weekIndex = Number(wIdx);
-      if (isPartTime && hours > weeklyMax) {
+      if (isPartTime && hours > weeklyMax && !isWeeklyWorkDaysMatched(weekIndex)) {
         isWeeklyOver = true;
         const weekDays = days.filter((d) => d.weekIndex === weekIndex);
         const violationDate = weekDays[weekDays.length - 1]?.date || days[days.length - 1].date;
@@ -221,27 +208,13 @@ export function validateSchedule(
       }
     });
 
-    // パート: 週の勤務日数チェック
-    if (isPartTime && allowedWeeklyWorkDays && targetWeeklyWorkDays !== undefined) {
+    // パート: 週の勤務日数（複数選択可）チェック
+    if (isPartTime && allowedWeeklyWorkDays && allowedWeeklyWorkDays.length > 0) {
       const weekIndexes = [...new Set(days.map((day) => day.weekIndex))];
       weekIndexes.forEach((weekIndex) => {
         const weekDays = days.filter((d) => d.weekIndex === weekIndex);
         const count = weeklyWorkDaysCount[weekIndex] || 0;
-        const isMonthEndWeek = weekIndex === Math.max(...weekIndexes);
-        const targetRange =
-          weekIndex === 0 && !isMonthEndWeek
-            ? previousMonthStats[staff.id]?.hasData
-              ? { min: targetWeeklyWorkDays, max: targetWeeklyWorkDays }
-              : {
-                  min: Math.min(targetWeeklyWorkDays, weekDays.length),
-                  max: Math.min(targetWeeklyWorkDays, weekDays.length),
-                }
-            : getPartTimeWeekTargetRange(
-                targetWeeklyWorkDays,
-                weekDays.length,
-                isMonthEndWeek
-              );
-        if (count < targetRange.min || count > targetRange.max) {
+        if (weekDays.length >= 5 && !allowedWeeklyWorkDays.includes(count)) {
           addViolation({
             id: `v_weekly_days_${staff.id}_w${weekIndex}`,
             severity: 'WARNING',
@@ -249,7 +222,7 @@ export function validateSchedule(
             staffName: staff.name,
             date: weekDays[weekDays.length - 1].date,
             ruleType: 'WEEKLY_DAYS_MISMATCH',
-            message: `第${weekIndex + 1}週の勤務日数（${count}日）が設定範囲（週${targetWeeklyWorkDays}日を基準: ${targetRange.min}〜${targetRange.max}日）と一致していません`,
+            message: `第${weekIndex + 1}週の勤務日数（${count}日）が設定（週${[...allowedWeeklyWorkDays].sort().join('・')}日）と一致していません`,
           });
         }
       });

@@ -20,6 +20,18 @@ export function generateAutomatedSchedule(
 ): Record<string, ShiftAssignment> {
   const days = getDaysInMonth(plan.yearMonth);
   const newAssignments: Record<string, ShiftAssignment> = {};
+  const generationWarnings: string[] = [];
+  const shuffle = <T>(items: T[]): T[] => {
+    const shuffled = [...items];
+    for (let index = shuffled.length - 1; index > 0; index--) {
+      const swapIndex = Math.floor(Math.random() * (index + 1));
+      [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
+    }
+    return shuffled;
+  };
+  const addGenerationWarning = (message: string) => {
+    generationWarnings.push(message);
+  };
   const previousMonthStats = getPreviousMonthWorkStats(
     plan.yearMonth,
     plan.staffList,
@@ -72,7 +84,7 @@ export function generateAutomatedSchedule(
   const staffWorkHours: Record<string, number> = {};
   const staffWeeklyWorkHours: Record<string, Record<number, number>> = {};
   const staffWeeklyWorkDaysCount: Record<string, Record<number, number>> = {};
-  const staffNightCounts: Record<string, number> = {};
+  const staffMonthlyShiftCounts: Record<string, Partial<Record<ShiftTypeId, number>>> = {};
   const staffWeekendCounts: Record<string, number> = {};
   const staffHolidayCounts: Record<string, number> = {};
   const staffDayShiftCounts: Record<string, Partial<Record<'EARLY' | 'DAY' | 'LATE', number>>> = {};
@@ -85,7 +97,7 @@ export function generateAutomatedSchedule(
     staffWorkHours[s.id] = 0;
     staffWeeklyWorkHours[s.id] = {};
     staffWeeklyWorkDaysCount[s.id] = {};
-    staffNightCounts[s.id] = 0;
+    staffMonthlyShiftCounts[s.id] = {};
     staffWeekendCounts[s.id] = 0;
     staffHolidayCounts[s.id] = 0;
     staffDayShiftCounts[s.id] = { EARLY: 0, DAY: 0, LATE: 0 };
@@ -166,10 +178,35 @@ export function generateAutomatedSchedule(
     staffDayShiftCounts[staffId][shiftId] = getDayShiftCount(staffId, shiftId) + 1;
   };
 
+  const getMonthlyShiftCount = (staffId: string, shiftId: ShiftTypeId): number =>
+    staffMonthlyShiftCounts[staffId]?.[shiftId] || 0;
+
+  const addMonthlyShiftCount = (staffId: string, shiftId: ShiftTypeId) => {
+    if (!staffMonthlyShiftCounts[staffId]) return;
+    staffMonthlyShiftCounts[staffId][shiftId] =
+      getMonthlyShiftCount(staffId, shiftId) + 1;
+  };
+
+  const removeMonthlyShiftCount = (staffId: string, shiftId: ShiftTypeId) => {
+    if (!staffMonthlyShiftCounts[staffId]) return;
+    staffMonthlyShiftCounts[staffId][shiftId] = Math.max(
+      0,
+      getMonthlyShiftCount(staffId, shiftId) - 1
+    );
+  };
+
+  const orderByMonthlyShiftCount = (staff: Staff[], shiftId: ShiftTypeId): Staff[] =>
+    shuffle(staff).sort(
+      (first, second) =>
+        getMonthlyShiftCount(first.id, shiftId) -
+        getMonthlyShiftCount(second.id, shiftId)
+    );
+
   // 初期リクエスト・固定・ロック済みセルの労働時間を積算
   Object.values(newAssignments).forEach((assign) => {
     const shift = plan.shiftTypes[assign.shiftTypeId];
     addDayShiftCount(assign.staffId, assign.shiftTypeId);
+    addMonthlyShiftCount(assign.staffId, assign.shiftTypeId);
     if (assign.shiftTypeId === 'HOLIDAY' || assign.shiftTypeId === 'PAID_LEAVE') {
       staffHolidayCounts[assign.staffId] = (staffHolidayCounts[assign.staffId] || 0) + 1;
     }
@@ -246,8 +283,8 @@ export function generateAutomatedSchedule(
 
     if (!existingNightStaff && nightEligibleStaff.length > 0) {
       // 候補スタッフの選定（連勤数、翌日の空き、累計夜勤数でソート）
-      const candidates = nightEligibleStaff
-        .filter((s) => {
+      const candidates = orderByMonthlyShiftCount(
+        nightEligibleStaff.filter((s) => {
           const todayKey = `${s.id}_${day.date}`;
           if (newAssignments[todayKey]) return false;
           // 連勤チェック（夜勤を入れると連勤オーバーしないか）
@@ -293,23 +330,9 @@ export function generateAutomatedSchedule(
           }
 
           return true;
-        })
-        .sort((a, b) => {
-          // 明けの翌日（dayIndex + 2）に有休・休日の希望が入っているスタッフを優先
-          let bonusA = 0;
-          let bonusB = 0;
-          if (dayIndex < days.length - 2) {
-            const d2 = days[dayIndex + 2].date;
-            const reqA = plan.requests.find((r) => r.staffId === a.id && r.date === d2);
-            const reqB = plan.requests.find((r) => r.staffId === b.id && r.date === d2);
-            if (reqA?.requestedShiftId === 'PAID_LEAVE' || reqA?.requestedShiftId === 'HOLIDAY') bonusA += 20;
-            if (reqB?.requestedShiftId === 'PAID_LEAVE' || reqB?.requestedShiftId === 'HOLIDAY') bonusB += 20;
-          }
-
-          // 夜勤回数の少なさを最優先（回数が同じ場合の経過日数優先は適用しない）
-          const countDiff = (staffNightCounts[a.id] || 0) - (staffNightCounts[b.id] || 0);
-          return countDiff - (bonusA - bonusB);
-        });
+        }),
+        'NIGHT'
+      );
 
       if (candidates.length > 0) {
         const selected = candidates[0];
@@ -321,7 +344,7 @@ export function generateAutomatedSchedule(
           isLocked: false,
           isRequested: false,
         };
-        staffNightCounts[selected.id] = (staffNightCounts[selected.id] || 0) + 1;
+        addMonthlyShiftCount(selected.id, 'NIGHT');
         const nightHours = getStaffShiftWorkHours(selected, plan.shiftTypes.NIGHT);
         staffWorkHours[selected.id] += nightHours;
         if (!staffWeeklyWorkHours[selected.id]) staffWeeklyWorkHours[selected.id] = {};
@@ -373,7 +396,17 @@ export function generateAutomatedSchedule(
             staffHolidayCounts[selected.id] = (staffHolidayCounts[selected.id] || 0) + 1;
           }
         }
+      } else if ((plan.rules.defaultRequirements?.NIGHT ?? 1) > 0) {
+        addGenerationWarning(
+          `${day.date}: 夜勤の条件を満たすスタッフがいないため、夜勤を割り当てられませんでした。`
+        );
       }
+    } else if (
+      !existingNightStaff &&
+      nightEligibleStaff.length === 0 &&
+      (plan.rules.defaultRequirements?.NIGHT ?? 1) > 0
+    ) {
+      addGenerationWarning(`${day.date}: 夜勤可能なスタッフがいないため、夜勤を割り当てられませんでした。`);
     }
   });
 
@@ -615,29 +648,44 @@ export function generateAutomatedSchedule(
           staff.ngStaffIds.includes(assign.staffId)
         );
 
-      const eligible = unassignedStaff
-        .filter((staff) => {
-          return !hasNgConflict(staff) && getCandidateScore(staff, shiftId) > -5000;
-        })
-        .sort((a, b) => {
+      const orderCandidates = (staffCandidates: Staff[], allowLimitOverrides: boolean) => {
+        if (shiftId === 'EARLY' || shiftId === 'LATE') {
+          return orderByMonthlyShiftCount(staffCandidates, shiftId);
+        }
+        return shuffle(staffCandidates).sort((a, b) => {
           const partTimePriority =
             Number(hasPartTimeWorkCapacity(b)) - Number(hasPartTimeWorkCapacity(a));
-          return partTimePriority || getCandidateScore(b, shiftId) - getCandidateScore(a, shiftId);
+          return partTimePriority ||
+            getCandidateScore(b, shiftId, allowLimitOverrides) -
+              getCandidateScore(a, shiftId, allowLimitOverrides);
         });
+      };
+
+      const eligible = orderCandidates(
+        unassignedStaff.filter(
+          (staff) => !hasNgConflict(staff) && getCandidateScore(staff, shiftId) > -5000
+        ),
+        false
+      );
 
       const emergencyEligible = eligible.length === 0
-        ? unassignedStaff
-            .filter((staff) => !hasNgConflict(staff) && getCandidateScore(staff, shiftId, true) > -9999)
-            .sort((a, b) => {
-              const partTimePriority =
-                Number(hasPartTimeWorkCapacity(b)) - Number(hasPartTimeWorkCapacity(a));
-              return partTimePriority ||
-                getCandidateScore(b, shiftId, true) - getCandidateScore(a, shiftId, true);
-            })
+        ? orderCandidates(
+            unassignedStaff.filter(
+              (staff) =>
+                !hasNgConflict(staff) &&
+                getCandidateScore(staff, shiftId, true) > -9999
+            ),
+            true
+          )
         : [];
       const chosen = eligible[0] || emergencyEligible[0];
 
       if (chosen) {
+        if (eligible.length === 0) {
+          addGenerationWarning(
+            `${day.date}: ${plan.shiftTypes[shiftId]?.name || shiftId}は条件緩和のフォールバックで割り当てました。`
+          );
+        }
         const key = `${chosen.id}_${day.date}`;
         newAssignments[key] = {
           staffId: chosen.id,
@@ -647,6 +695,7 @@ export function generateAutomatedSchedule(
           isRequested: false,
         };
         addDayShiftCount(chosen.id, shiftId);
+        addMonthlyShiftCount(chosen.id, shiftId);
 
         const workHours = getStaffShiftWorkHours(chosen, plan.shiftTypes[shiftId]);
         staffWorkHours[chosen.id] += workHours;
@@ -663,6 +712,10 @@ export function generateAutomatedSchedule(
         // unassignedStaff から除外
         const idx = unassignedStaff.findIndex((s) => s.id === chosen.id);
         if (idx !== -1) unassignedStaff.splice(idx, 1);
+      } else {
+        addGenerationWarning(
+          `${day.date}: ${plan.shiftTypes[shiftId]?.name || shiftId}の必要人数を満たせませんでした。`
+        );
       }
     });
 
@@ -844,7 +897,7 @@ export function generateAutomatedSchedule(
               }
               if (consecutiveDays > plan.rules.maxConsecutiveWorkDays) return null;
 
-              return { day, key, shiftId, workHours, random: Math.random() };
+              return { day, key, shiftId, workHours };
             })
             .filter(
               (
@@ -854,12 +907,10 @@ export function generateAutomatedSchedule(
                 key: string;
                 shiftId: 'DAY' | 'EARLY' | 'LATE';
                 workHours: number;
-                random: number;
               } => candidate !== null
-            )
-            .sort((a, b) => a.random - b.random);
+            );
 
-          const chosen = candidates[0];
+          const chosen = shuffle(candidates)[0];
           if (!chosen) break;
 
           newAssignments[chosen.key] = {
@@ -870,6 +921,7 @@ export function generateAutomatedSchedule(
             isRequested: false,
           };
           addDayShiftCount(staff.id, chosen.shiftId);
+          addMonthlyShiftCount(staff.id, chosen.shiftId);
           staffWorkHours[staff.id] += chosen.workHours;
           staffWeeklyWorkHours[staff.id][weekIndex] =
             (staffWeeklyWorkHours[staff.id][weekIndex] || 0) + chosen.workHours;
@@ -888,13 +940,19 @@ export function generateAutomatedSchedule(
               const key = `${staff.id}_${day.date}`;
               const assignment = newAssignments[key];
               if (!assignment || assignment.isLocked || assignment.isRequested) return null;
-              if (assignment.shiftTypeId === 'HOLIDAY' || assignment.shiftTypeId === 'NIGHT_NEXT') return null;
+              if (
+                assignment.shiftTypeId !== 'DAY' &&
+                assignment.shiftTypeId !== 'EARLY' &&
+                assignment.shiftTypeId !== 'LATE'
+              ) {
+                return null;
+              }
               if (staff.fixedDayShifts?.[day.dayOfWeekIndex]) return null;
               return { day, key, shiftTypeId: assignment.shiftTypeId };
             })
             .filter((c): c is NonNullable<typeof c> => c !== null);
 
-          const chosenExcess = excessCandidates[excessCandidates.length - 1];
+          const chosenExcess = shuffle(excessCandidates)[0];
           if (!chosenExcess) break;
 
           newAssignments[chosenExcess.key] = {
@@ -912,8 +970,15 @@ export function generateAutomatedSchedule(
             (staffWeeklyWorkHours[staff.id][weekIndex] || 0) - workHours
           );
           staffWeeklyWorkDaysCount[staff.id][weekIndex] = currentDays - 1;
+          removeMonthlyShiftCount(staff.id, chosenExcess.shiftTypeId);
           currentDays--;
           staffHolidayCounts[staff.id] = (staffHolidayCounts[staff.id] || 0) + 1;
+        }
+
+        if (currentDays !== targetDays) {
+          addGenerationWarning(
+            `${staff.name}: 第${weekIndex + 1}週は固定・希望・夜勤などの条件により、勤務日数を目標${targetDays}日にできませんでした（現在${currentDays}日）。`
+          );
         }
       });
     });
@@ -936,7 +1001,8 @@ export function generateAutomatedSchedule(
       let daysNeeded = Math.round(diff / 8);
 
       for (let pass = 0; pass < 2 && daysNeeded > 0; pass++) {
-        const candidateDays = days
+        const candidateDays = shuffle(
+          days
           .map((day, dIdx) => {
             const key = `${staff.id}_${day.date}`;
             const assign = newAssignments[key];
@@ -999,6 +1065,7 @@ export function generateAutomatedSchedule(
             return { day, dIdx, score };
           })
           .filter((item): item is { day: (typeof days)[0]; dIdx: number; score: number } => item !== null)
+        )
           .sort((a, b) => b.score - a.score);
 
         for (const candidate of candidateDays) {
@@ -1045,7 +1112,8 @@ export function generateAutomatedSchedule(
       // 超過している場合: 日勤帯（DAY, EARLY, LATE）を休日（HOLIDAY）に変更して合致させる
       let daysToRemove = Math.round((-diff) / 8);
 
-      const candidateDays = days
+      const candidateDays = shuffle(
+        days
         .map((day, dIdx) => {
           const key = `${staff.id}_${day.date}`;
           const assign = newAssignments[key];
@@ -1099,6 +1167,7 @@ export function generateAutomatedSchedule(
             score: number;
           } => item !== null
         )
+      )
         .sort((a, b) => b.score - a.score);
 
       for (const candidate of candidateDays) {
@@ -1127,6 +1196,12 @@ export function generateAutomatedSchedule(
         }
         daysToRemove--;
       }
+    }
+
+    if ((staffWorkHours[staff.id] || 0) !== targetHours) {
+      addGenerationWarning(
+        `${staff.name}: 制約の競合により月間労働時間を目標${targetHours}時間に調整できませんでした（現在${staffWorkHours[staff.id] || 0}時間）。`
+      );
     }
   });
 
@@ -1161,7 +1236,7 @@ export function generateAutomatedSchedule(
       let surplusWeek: number | null = null;
       let deficitWeek: number | null = null;
 
-      daysByWeek.forEach((_wDays, wIdx) => {
+      shuffle([...daysByWeek.keys()]).forEach((wIdx) => {
         const target = fullTimeWeeklyHolidayTargets[wIdx]?.targetHolidays ?? 2;
         const holidays = getWeekHolidays(wIdx);
         if (holidays > target && surplusWeek === null) {
@@ -1175,7 +1250,7 @@ export function generateAutomatedSchedule(
 
       // surplusWeek の中から DAY に変更可能な HOLIDAY を探索
       const surplusDays = daysByWeek.get(surplusWeek) || [];
-      const holidayCandidates = surplusDays
+      const holidayCandidates = shuffle(surplusDays)
         .map((d) => {
           const dIdx = days.findIndex((mDay) => mDay.date === d.date);
           const key = `${staff.id}_${d.date}`;
@@ -1198,7 +1273,7 @@ export function generateAutomatedSchedule(
 
       // deficitWeek の中から HOLIDAY に変更可能な DAY/EARLY/LATE を探索
       const deficitDays = daysByWeek.get(deficitWeek) || [];
-      const workCandidates = deficitDays
+      const workCandidates = shuffle(deficitDays)
         .map((d) => {
           const dIdx = days.findIndex((mDay) => mDay.date === d.date);
           const key = `${staff.id}_${d.date}`;
@@ -1242,7 +1317,21 @@ export function generateAutomatedSchedule(
         (staffWeeklyWorkDaysCount[staff.id][deficitWeek] || 0) - 1
       );
     }
+
+    daysByWeek.forEach((_weekDays, weekIndex) => {
+      const target = fullTimeWeeklyHolidayTargets[weekIndex]?.targetHolidays ?? 2;
+      const actual = getWeekHolidays(weekIndex);
+      if (actual !== target) {
+        addGenerationWarning(
+          `${staff.name}: 第${weekIndex + 1}週の休日数は条件の競合により目標${target}日ではなく${actual}日です。`
+        );
+      }
+    });
   });
+
+  if (generationWarnings.length > 0) {
+    console.warn('[シフト自動作成] 一部の条件を満たせませんでした。', generationWarnings);
+  }
 
   return newAssignments;
 }

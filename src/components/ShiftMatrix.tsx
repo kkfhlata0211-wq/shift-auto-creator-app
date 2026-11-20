@@ -532,16 +532,23 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
                 />
                 {days.map((day) => {
                   const cov = validation.dailyCoverageSummary[day.date];
-                  const isDeficit = (cov?.actualEarly || 0) < (plan.rules.defaultRequirements?.EARLY ?? 1);
+                  const actual = cov?.actualEarly || 0;
+                  const required = plan.rules.defaultRequirements?.EARLY ?? 1;
+                  const isDeficit = actual < required;
+                  const isExcess = actual > required;
                   return (
                     <td
                       key={`early_${day.date}`}
                       style={getDayColumnStyle(day)}
-                      className={`text-center font-bold text-xs py-1 border-b border-r ${
-                        isDeficit ? 'bg-rose-200 text-rose-800 border-rose-300' : 'bg-amber-100 text-amber-800 border-amber-300'
-                      }`}
+                      className={`text-center text-xs py-1 border-b border-r ${
+                        isDeficit
+                          ? 'font-bold bg-rose-200 text-rose-800 border-rose-300'
+                          : isExcess
+                          ? 'font-bold bg-emerald-200 text-emerald-800 border-emerald-300'
+                          : 'font-bold bg-amber-100 text-amber-800 border-amber-300'
+                      } ${isDeficit || isExcess ? 'animate-pulse' : ''}`}
                     >
-                      {cov?.actualEarly || 0}
+                      {actual}
                     </td>
                   );
                 })}
@@ -569,16 +576,23 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
                 />
                 {days.map((day) => {
                   const cov = validation.dailyCoverageSummary[day.date];
-                  const isDeficit = (cov?.actualDay || 0) < (plan.rules.defaultRequirements?.DAY ?? 2);
+                  const actual = cov?.actualDay || 0;
+                  const required = plan.rules.defaultRequirements?.DAY ?? 2;
+                  const isDeficit = actual < required;
+                  const isExcess = actual > required;
                   return (
                     <td
                       key={`day_${day.date}`}
                       style={getDayColumnStyle(day)}
-                      className={`text-center font-bold text-xs py-1 border-b border-r ${
-                        isDeficit ? 'bg-rose-200 text-rose-800 border-rose-300' : 'bg-blue-100 text-blue-800 border-blue-300'
-                      }`}
+                      className={`text-center text-xs py-1 border-b border-r ${
+                        isDeficit
+                          ? 'font-bold bg-rose-200 text-rose-800 border-rose-300'
+                          : isExcess
+                          ? 'font-bold bg-emerald-200 text-emerald-800 border-emerald-300'
+                          : 'font-bold bg-blue-100 text-blue-800 border-blue-300'
+                      } ${isDeficit || isExcess ? 'animate-pulse' : ''}`}
                     >
-                      {cov?.actualDay || 0}
+                      {actual}
                     </td>
                   );
                 })}
@@ -606,16 +620,23 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
                 />
                 {days.map((day) => {
                   const cov = validation.dailyCoverageSummary[day.date];
-                  const isDeficit = (cov?.actualLate || 0) < (plan.rules.defaultRequirements?.LATE ?? 1);
+                  const actual = cov?.actualLate || 0;
+                  const required = plan.rules.defaultRequirements?.LATE ?? 1;
+                  const isDeficit = actual < required;
+                  const isExcess = actual > required;
                   return (
                     <td
                       key={`late_${day.date}`}
                       style={getDayColumnStyle(day)}
-                      className={`text-center font-bold text-xs py-1 border-b border-r ${
-                        isDeficit ? 'bg-rose-200 text-rose-800 border-rose-300' : 'bg-orange-100 text-orange-800 border-orange-300'
-                      }`}
+                      className={`text-center text-xs py-1 border-b border-r ${
+                        isDeficit
+                          ? 'font-bold bg-rose-200 text-rose-800 border-rose-300'
+                          : isExcess
+                          ? 'font-bold bg-emerald-200 text-emerald-800 border-emerald-300'
+                          : 'font-bold bg-orange-100 text-orange-800 border-orange-300'
+                      } ${isDeficit || isExcess ? 'animate-pulse' : ''}`}
                     >
-                      {cov?.actualLate || 0}
+                      {actual}
                     </td>
                   );
                 })}
@@ -643,16 +664,23 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
                 />
                 {days.map((day) => {
                   const cov = validation.dailyCoverageSummary[day.date];
-                  const isDeficit = (cov?.actualNight || 0) < (plan.rules.defaultRequirements?.NIGHT ?? 1);
+                  const actual = cov?.actualNight || 0;
+                  const required = plan.rules.defaultRequirements?.NIGHT ?? 1;
+                  const isDeficit = actual < required;
+                  const isExcess = actual > required;
                   return (
                     <td
                       key={`night_${day.date}`}
                       style={getDayColumnStyle(day)}
-                      className={`text-center font-bold text-xs py-1 border-b border-r ${
-                        isDeficit ? 'bg-rose-200 text-rose-800 border-rose-300' : 'bg-purple-100 text-purple-800 border-purple-300'
-                      }`}
+                      className={`text-center text-xs py-1 border-b border-r ${
+                        isDeficit
+                          ? 'font-bold bg-rose-200 text-rose-800 border-rose-300'
+                          : isExcess
+                          ? 'font-bold bg-emerald-200 text-emerald-800 border-emerald-300'
+                          : 'font-bold bg-purple-100 text-purple-800 border-purple-300'
+                      } ${isDeficit || isExcess ? 'animate-pulse' : ''}`}
                     >
-                      {cov?.actualNight || 0}
+                      {actual}
                     </td>
                   );
                 })}
