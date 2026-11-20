@@ -8,7 +8,9 @@ import { MonthlySchedulePlan, ShiftTypeId, Staff, ConstraintRules, DayEvent } fr
 import { createInitialSchedule } from './mock/initialData';
 import { validateSchedule } from './engine/validator';
 import { generateAutomatedSchedule } from './engine/generator';
+import { DEFAULT_PART_TIME_DAILY_WORK_HOURS } from './engine/partTimeRules';
 import { initDatabase, loadPlans, savePlans, migrateFromLocalStorage } from './utils/database';
+import { getPreviousYearMonth } from './utils/dateUtils';
 
 export function App() {
   const [isInitialized, setIsInitialized] = useState(false);
@@ -43,7 +45,11 @@ export function App() {
             saved.staffList = saved.staffList.map((staff) => ({
               ...staff,
               employmentType: (staff.employmentType as string) === 'SHORT_TIME' ? 'PART_TIME' : staff.employmentType,
-              weeklyMaxHours: staff.employmentType === 'PART_TIME' ? (staff.weeklyMaxHours || 40) : staff.weeklyMaxHours,
+              weeklyMaxHours: staff.employmentType === 'PART_TIME' ? 40 : staff.weeklyMaxHours,
+              dailyWorkHours:
+                staff.employmentType === 'PART_TIME'
+                  ? staff.dailyWorkHours ?? DEFAULT_PART_TIME_DAILY_WORK_HOURS
+                  : staff.dailyWorkHours,
             }));
           }
         });
@@ -75,6 +81,9 @@ export function App() {
   }, []);
 
   const plan = scheduleState.plans[scheduleState.selectedYearMonth];
+  const previousMonthPlan = plan
+    ? scheduleState.plans[getPreviousYearMonth(plan.yearMonth)]
+    : undefined;
   const setPlan = (update: MonthlySchedulePlan | ((previous: MonthlySchedulePlan) => MonthlySchedulePlan)) => {
     setScheduleState((previous) => {
       const currentPlan = previous.plans[previous.selectedYearMonth];
@@ -109,15 +118,18 @@ export function App() {
         dailyCoverageSummary: {},
       };
     }
-    return validateSchedule(plan);
-  }, [plan]);
+    return validateSchedule(plan, previousMonthPlan);
+  }, [plan, previousMonthPlan]);
 
   // 自動シフト作成の実行
   const handleAutoGenerate = () => {
     setIsGenerating(true);
     // UIの描画更新を挟んでから計算実行
     setTimeout(() => {
-      const generatedAssignments = generateAutomatedSchedule(plan, { preserveLocked: true });
+      const generatedAssignments = generateAutomatedSchedule(plan, {
+        preserveLocked: true,
+        previousMonthPlan,
+      });
       setPlan((prev) => ({
         ...prev,
         assignments: generatedAssignments,
@@ -233,6 +245,7 @@ export function App() {
           preferredShiftTypes: staff.preferredShiftTypes ? [...staff.preferredShiftTypes] : undefined,
           fixedDayShifts: staff.fixedDayShifts ? { ...staff.fixedDayShifts } : undefined,
           allowedWeeklyWorkDays: staff.allowedWeeklyWorkDays ? [...staff.allowedWeeklyWorkDays] : undefined,
+          dailyWorkHours: staff.dailyWorkHours ?? DEFAULT_PART_TIME_DAILY_WORK_HOURS,
         })),
         shiftTypes: { ...currentPlan.shiftTypes },
         assignments: {},

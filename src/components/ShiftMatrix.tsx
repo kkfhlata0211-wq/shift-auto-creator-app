@@ -3,6 +3,7 @@ import { Lock, Moon, Star, Calendar, Plus, Trash2, Check, X } from 'lucide-react
 import { MonthlySchedulePlan, ShiftTypeId, DayEvent } from '../types/shift';
 import { getDaysInMonth, CalendarDay } from '../utils/dateUtils';
 import { ValidationSummary } from '../engine/validator';
+import { DEFAULT_PART_TIME_DAILY_WORK_HOURS, PART_TIME_WEEKLY_HOURS_LIMIT } from '../engine/partTimeRules';
 
 interface ShiftMatrixProps {
   plan: MonthlySchedulePlan;
@@ -198,7 +199,7 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
                   style={{ left: 260, width: 95 }}
                   className="sticky left-[260px] z-30 bg-slate-100 px-2 py-2 font-bold text-slate-700 border-b border-r border-slate-200 text-center"
                 >
-                  週契約時間
+                  1日労働時間
                 </th>
                 <th
                   style={{ left: 355, width: 95 }}
@@ -370,7 +371,7 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
                       </div>
                     </td>
 
-                    {/* 週労働時間（契約時間のみ記載、カウントした時間は記載しない） */}
+                    {/* パートの1日労働時間 */}
                     <td
                       style={{ left: 260, width: 95 }}
                       className={`sticky left-[260px] z-20 bg-white hover:bg-slate-50 px-2 py-2 border-b border-r border-slate-200 text-center ${
@@ -382,12 +383,12 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
                           className={`text-xs font-bold ${
                             hoursInfo.isWeeklyOver ? 'text-rose-600 font-black' : 'text-slate-700'
                           }`}
-                          title={`週契約時間: ${staff.weeklyMaxHours || 40}h${
-                            hoursInfo.isWeeklyOver ? ` (注意: 週上限${staff.weeklyMaxHours || 40}hを超過している週があります)` : ''
+                          title={`1日の労働時間: ${staff.dailyWorkHours ?? DEFAULT_PART_TIME_DAILY_WORK_HOURS}h${
+                            hoursInfo.isWeeklyOver ? ` (注意: 週上限${PART_TIME_WEEKLY_HOURS_LIMIT}hを超過している週があります)` : ''
                           }`}
                         >
-                          <span>週契約時間</span>
-                          <span>{staff.weeklyMaxHours || 40}h</span>
+                          <span>1日の労働時間</span>
+                          <span>{staff.dailyWorkHours ?? DEFAULT_PART_TIME_DAILY_WORK_HOURS}h</span>
                         </div>
                       ) : (
                         <span className="text-xs text-slate-400">-</span>

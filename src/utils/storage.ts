@@ -1,5 +1,6 @@
 import { MonthlySchedulePlan } from '../types/shift';
 import { getDaysInMonth } from './dateUtils';
+import { getStaffShiftWorkHours } from '../engine/partTimeRules';
 
 const STORAGE_KEY = 'SHIFT_AUTO_CREATOR_PLAN_V1';
 const PLANS_STORAGE_KEY = 'SHIFT_AUTO_CREATOR_PLANS_V1';
@@ -69,7 +70,7 @@ export function exportPlanAsCsv(plan: MonthlySchedulePlan): void {
       const assign = plan.assignments[key];
       if (!assign) return '-';
       const shift = plan.shiftTypes[assign.shiftTypeId];
-      if (shift?.isWork) totalHours += shift.workHours;
+      totalHours += getStaffShiftWorkHours(staff, shift);
       return shift ? shift.shortName : '-';
     });
 

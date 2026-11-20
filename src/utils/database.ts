@@ -72,6 +72,7 @@ function createTables(d: Database): void {
       can_night_shift INTEGER NOT NULL DEFAULT 0,
       monthly_max_hours REAL NOT NULL DEFAULT 168,
       weekly_max_hours REAL,
+      daily_work_hours REAL NOT NULL DEFAULT 8,
       min_holidays_per_month INTEGER NOT NULL DEFAULT 9,
       skill_level INTEGER NOT NULL DEFAULT 3,
       ng_staff_ids_json TEXT NOT NULL DEFAULT '[]',
@@ -82,6 +83,13 @@ function createTables(d: Database): void {
       sort_order INTEGER NOT NULL DEFAULT 0
     );
   `);
+  const staffColumns = d.exec('PRAGMA table_info(staff);');
+  if (
+    staffColumns.length > 0 &&
+    !staffColumns[0].values.some((row) => row[1] === 'daily_work_hours')
+  ) {
+    d.run('ALTER TABLE staff ADD COLUMN daily_work_hours REAL NOT NULL DEFAULT 8;');
+  }
 
   d.run(`
     CREATE TABLE IF NOT EXISTS assignments (
@@ -209,13 +217,13 @@ export async function savePlan(plan: MonthlySchedulePlan): Promise<void> {
     plan.staffList.forEach((s, idx) => {
       d.run(
         `INSERT OR REPLACE INTO staff (id, name, role, employment_type, can_night_shift, monthly_max_hours,
-         weekly_max_hours, min_holidays_per_month, skill_level, ng_staff_ids_json, preferred_shift_types_json,
+         weekly_max_hours, daily_work_hours, min_holidays_per_month, skill_level, ng_staff_ids_json, preferred_shift_types_json,
          fixed_shift_type, fixed_day_shifts_json, allowed_weekly_work_days_json, sort_order)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
         [
           s.id, s.name, s.role, s.employmentType,
           s.canNightShift ? 1 : 0, s.monthlyMaxHours,
-          s.weeklyMaxHours ?? null, s.minHolidaysPerMonth,
+          s.weeklyMaxHours ?? null, s.dailyWorkHours ?? 8, s.minHolidaysPerMonth,
           s.skillLevel, JSON.stringify(s.ngStaffIds),
           s.preferredShiftTypes ? JSON.stringify(s.preferredShiftTypes) : null,
           s.fixedShiftType ?? null,
@@ -299,6 +307,7 @@ export function loadPlans(): Record<string, MonthlySchedulePlan> {
           canNightShift: (sGet('can_night_shift') as number) === 1,
           monthlyMaxHours: sGet('monthly_max_hours') as number,
           weeklyMaxHours: sGet('weekly_max_hours') as number | undefined,
+          dailyWorkHours: sGet('daily_work_hours') as number,
           minHolidaysPerMonth: sGet('min_holidays_per_month') as number,
           skillLevel: sGet('skill_level') as Staff['skillLevel'],
           ngStaffIds: JSON.parse(sGet('ng_staff_ids_json') as string),

@@ -157,11 +157,13 @@ export const INITIAL_STAFF: Staff[] = [
     employmentType: 'PART_TIME',
     canNightShift: false,
     monthlyMaxHours: 120,
-    weeklyMaxHours: 30,
+    weeklyMaxHours: 40,
+    dailyWorkHours: 8,
     fixedShiftType: 'DAY', // 日勤固定パート
     minHolidaysPerMonth: 12,
     skillLevel: 2,
     ngStaffIds: ['st_02'], // 鈴木とNGペア
+    allowedWeeklyWorkDays: [3, 4], // 週3日・週4日選択（多い方の週4日基準）
   },
   {
     id: 'st_07',
@@ -170,10 +172,12 @@ export const INITIAL_STAFF: Staff[] = [
     employmentType: 'PART_TIME',
     canNightShift: false,
     monthlyMaxHours: 80,
-    weeklyMaxHours: 20,
+    weeklyMaxHours: 40,
+    dailyWorkHours: 8,
     minHolidaysPerMonth: 15,
     skillLevel: 1,
     ngStaffIds: [],
+    allowedWeeklyWorkDays: [2], // 週2日勤務
   },
   {
     id: 'st_08',

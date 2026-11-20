@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, UserPlus, Trash2, Edit2, Check, Moon, Star, Users, Calendar } from 'lucide-react';
 import { Staff, EmploymentType, ShiftTypeId } from '../types/shift';
+import { DEFAULT_PART_TIME_DAILY_WORK_HOURS } from '../engine/partTimeRules';
 
 interface StaffModalProps {
   isOpen: boolean;
@@ -39,7 +40,10 @@ export const StaffModal: React.FC<StaffModalProps> = ({
 
   const handleStartEdit = (staff: Staff) => {
     setEditingStaffId(staff.id);
-    setFormData({ ...staff });
+    setFormData({
+      ...staff,
+      dailyWorkHours: staff.dailyWorkHours ?? DEFAULT_PART_TIME_DAILY_WORK_HOURS,
+    });
     setIsAdding(false);
   };
 
@@ -54,6 +58,7 @@ export const StaffModal: React.FC<StaffModalProps> = ({
       canNightShift: false,
       monthlyMaxHours: 168,
       weeklyMaxHours: 40,
+      dailyWorkHours: DEFAULT_PART_TIME_DAILY_WORK_HOURS,
       minHolidaysPerMonth: 9,
       skillLevel: 3,
       ngStaffIds: [],
@@ -198,12 +203,16 @@ export const StaffModal: React.FC<StaffModalProps> = ({
                         employmentType: newType,
                         monthlyMaxHours: newType === 'FULL_TIME' ? 168 : 120,
                         weeklyMaxHours: newType === 'PART_TIME' ? 40 : undefined,
+                        dailyWorkHours:
+                          newType === 'PART_TIME'
+                            ? formData.dailyWorkHours ?? DEFAULT_PART_TIME_DAILY_WORK_HOURS
+                            : formData.dailyWorkHours,
                       });
                     }}
                     className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     <option value="FULL_TIME">正社員 (常勤)</option>
-                    <option value="PART_TIME">パート (契約時間管理)</option>
+                    <option value="PART_TIME">パート (時間・勤務日数管理)</option>
                   </select>
                 </div>
 
@@ -230,21 +239,28 @@ export const StaffModal: React.FC<StaffModalProps> = ({
                 {formData.employmentType === 'PART_TIME' ? (
                   <div>
                     <label className="block text-slate-700 font-semibold mb-1">
-                      週の契約労働時間 (h) <span className="text-blue-600 font-normal">※最大40h</span>
+                      1日の労働時間 (h)
                     </label>
                     <input
                       type="number"
-                      max={40}
-                      min={1}
-                      value={formData.weeklyMaxHours ?? 40}
+                      max={24}
+                      min={0.5}
+                      step={0.5}
+                      value={formData.dailyWorkHours ?? DEFAULT_PART_TIME_DAILY_WORK_HOURS}
                       onChange={(e) =>
                         setFormData({
                           ...formData,
-                          weeklyMaxHours: Math.min(40, Number(e.target.value)),
+                          dailyWorkHours: Math.min(
+                            24,
+                            Math.max(0.5, Number(e.target.value) || DEFAULT_PART_TIME_DAILY_WORK_HOURS)
+                          ),
                         })
                       }
                       className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-bold text-blue-700"
                     />
+                    <span className="text-[10px] text-slate-400 mt-1 block">
+                      ※ パートの総労働時間は勤務日数×この時間で計算します（週上限40h）。
+                    </span>
                   </div>
                 ) : (
                   <div>
@@ -336,7 +352,7 @@ export const StaffModal: React.FC<StaffModalProps> = ({
                     {/* 週の勤務日数（複数選択可） */}
                     <div className="col-span-3 pt-3 border-t border-blue-100">
                       <label className="block text-slate-700 font-semibold mb-1">
-                        週の希望勤務日数（複数選択可）
+                        週の勤務日数（※複数選択時は多い日数が適用）
                       </label>
                       <div className="flex flex-wrap gap-2">
                         {[1, 2, 3, 4, 5, 6].map((num) => {
@@ -364,7 +380,7 @@ export const StaffModal: React.FC<StaffModalProps> = ({
                         })}
                       </div>
                       <span className="text-[10px] text-slate-400 mt-1 block">
-                        ※ 複数選択可能です（例:「週3日」と「週4日」を選択した場合は週3〜4日勤務）
+                        ※ 複数選択時は多い日数が勤務目標になります（例:週3日・週4日を選択すると週4日勤務）。
                       </span>
                     </div>
 
@@ -532,8 +548,8 @@ export const StaffModal: React.FC<StaffModalProps> = ({
                         {staff.employmentType === 'PART_TIME' ? (
                           <div>
                             <div className="text-[10px] text-blue-700 font-semibold">
-                              週契約時間
-                              <div>{staff.weeklyMaxHours ?? 40}h</div>
+                              1日の労働時間
+                              <div>{staff.dailyWorkHours ?? DEFAULT_PART_TIME_DAILY_WORK_HOURS}h</div>
                             </div>
                             {staff.allowedWeeklyWorkDays && staff.allowedWeeklyWorkDays.length > 0 && (
                               <div className="text-[10px] text-blue-600 font-semibold mt-0.5">

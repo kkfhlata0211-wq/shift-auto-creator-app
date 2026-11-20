@@ -9,6 +9,12 @@ export interface CalendarDay {
   weekIndex: number;  // 週番号（月曜起算）
 }
 
+export function getPreviousYearMonth(yearMonth: string): string {
+  const [year, month] = yearMonth.split('-').map(Number);
+  const previousMonth = new Date(year, month - 2, 1);
+  return `${previousMonth.getFullYear()}-${String(previousMonth.getMonth() + 1).padStart(2, '0')}`;
+}
+
 export function getDaysInMonth(yearMonth: string): CalendarDay[] {
   const [yearStr, monthStr] = yearMonth.split('-');
   const year = parseInt(yearStr, 10);

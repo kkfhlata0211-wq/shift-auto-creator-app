@@ -1,8 +1,17 @@
 import { MonthlySchedulePlan, ShiftAssignment, ShiftTypeId, Staff } from '../types/shift';
 import { getDaysInMonth } from '../utils/dateUtils';
+import {
+  getPartTimeDailyWorkHours,
+  getPartTimeWeekTargetRange,
+  getPartTimeWeeklyWorkDaysTarget,
+  getPreviousMonthWorkStats,
+  getStaffShiftWorkHours,
+  PART_TIME_WEEKLY_HOURS_LIMIT,
+} from './partTimeRules';
 
 export interface GenerationOptions {
   preserveLocked?: boolean;
+  previousMonthPlan?: MonthlySchedulePlan;
 }
 
 export function generateAutomatedSchedule(
@@ -11,6 +20,11 @@ export function generateAutomatedSchedule(
 ): Record<string, ShiftAssignment> {
   const days = getDaysInMonth(plan.yearMonth);
   const newAssignments: Record<string, ShiftAssignment> = {};
+  const previousMonthStats = getPreviousMonthWorkStats(
+    plan.yearMonth,
+    plan.staffList,
+    options.previousMonthPlan
+  );
 
   // 1. 既存のロック済みセル・リクエストを初期設定
   if (options.preserveLocked) {
@@ -86,6 +100,58 @@ export function generateAutomatedSchedule(
     }
   });
 
+  Object.entries(previousMonthStats).forEach(([staffId, stats]) => {
+    staffWeeklyWorkHours[staffId][0] = stats.workHours;
+    staffWeeklyWorkDaysCount[staffId][0] = stats.workDays;
+  });
+
+  const daysByWeek = new Map<number, typeof days>();
+  days.forEach((day) => {
+    const weekDays = daysByWeek.get(day.weekIndex) || [];
+    weekDays.push(day);
+    daysByWeek.set(day.weekIndex, weekDays);
+  });
+  const lastWeekIndex = Math.max(...daysByWeek.keys());
+  const partTimeWeeklyTargets: Record<string, Record<number, number>> = {};
+  plan.staffList.forEach((staff) => {
+    if (staff.employmentType !== 'PART_TIME') return;
+    const targetDays = getPartTimeWeeklyWorkDaysTarget(staff);
+    if (targetDays === undefined) return;
+
+    partTimeWeeklyTargets[staff.id] = {};
+    daysByWeek.forEach((weekDays, weekIndex) => {
+      const isMonthEndWeek = weekIndex === lastWeekIndex;
+      const hasPreviousWeekData = previousMonthStats[staff.id]?.hasData ?? false;
+      const range =
+        weekIndex === 0 && !isMonthEndWeek
+          ? hasPreviousWeekData
+            ? { min: targetDays, max: targetDays }
+            : {
+                min: Math.min(targetDays, weekDays.length),
+                max: Math.min(targetDays, weekDays.length),
+              }
+          : getPartTimeWeekTargetRange(targetDays, weekDays.length, isMonthEndWeek);
+      partTimeWeeklyTargets[staff.id][weekIndex] = range.max;
+    });
+  });
+
+  // 正社員の各週の目標休日数（完全週7日は2日、端数週はその割合）
+  const fullTimeWeeklyHolidayTargets: Record<number, { targetHolidays: number; maxWorkDays: number }> = {};
+  daysByWeek.forEach((weekDays, weekIndex) => {
+    const len = weekDays.length;
+    if (len >= 7) {
+      fullTimeWeeklyHolidayTargets[weekIndex] = { targetHolidays: 2, maxWorkDays: 5 };
+    } else if (len >= 6) {
+      fullTimeWeeklyHolidayTargets[weekIndex] = { targetHolidays: 2, maxWorkDays: 4 };
+    } else if (len >= 4) {
+      fullTimeWeeklyHolidayTargets[weekIndex] = { targetHolidays: 1, maxWorkDays: len - 1 };
+    } else if (len >= 2) {
+      fullTimeWeeklyHolidayTargets[weekIndex] = { targetHolidays: 1, maxWorkDays: len - 1 };
+    } else {
+      fullTimeWeeklyHolidayTargets[weekIndex] = { targetHolidays: 0, maxWorkDays: 1 };
+    }
+  });
+
   const getDayShiftCount = (staffId: string, shiftId: ShiftTypeId): number => {
     if (shiftId !== 'EARLY' && shiftId !== 'DAY' && shiftId !== 'LATE') return 0;
     return staffDayShiftCounts[staffId]?.[shiftId] || 0;
@@ -105,12 +171,14 @@ export function generateAutomatedSchedule(
       staffHolidayCounts[assign.staffId] = (staffHolidayCounts[assign.staffId] || 0) + 1;
     }
     if (shift?.isWork) {
+      const staff = plan.staffList.find((item) => item.id === assign.staffId);
+      const workHours = staff ? getStaffShiftWorkHours(staff, shift) : shift.workHours;
       const day = days.find((d) => d.date === assign.date);
       if (day) {
-        staffWorkHours[assign.staffId] = (staffWorkHours[assign.staffId] || 0) + shift.workHours;
+        staffWorkHours[assign.staffId] = (staffWorkHours[assign.staffId] || 0) + workHours;
         const wIdx = day.weekIndex;
         if (!staffWeeklyWorkHours[assign.staffId]) staffWeeklyWorkHours[assign.staffId] = {};
-        staffWeeklyWorkHours[assign.staffId][wIdx] = (staffWeeklyWorkHours[assign.staffId][wIdx] || 0) + shift.workHours;
+        staffWeeklyWorkHours[assign.staffId][wIdx] = (staffWeeklyWorkHours[assign.staffId][wIdx] || 0) + workHours;
 
         if (!staffWeeklyWorkDaysCount[assign.staffId]) staffWeeklyWorkDaysCount[assign.staffId] = {};
         staffWeeklyWorkDaysCount[assign.staffId][wIdx] = (staffWeeklyWorkDaysCount[assign.staffId][wIdx] || 0) + 1;
@@ -211,16 +279,14 @@ export function generateAutomatedSchedule(
             }
           }
 
-          // パートの場合、週上限40hに夜勤（16h）が収まるか確認
+          // パートは週の勤務日数を最優先で管理（月間上限時間は参考値のみ）
           if (s.employmentType === 'PART_TIME') {
-            const weekMax = s.weeklyMaxHours || 40;
+            const nightHours = getStaffShiftWorkHours(s, plan.shiftTypes.NIGHT);
             const currentWeekHours = staffWeeklyWorkHours[s.id]?.[day.weekIndex] || 0;
-            if (currentWeekHours + 16 > weekMax) return false;
-            if (staffWorkHours[s.id] + 16 > s.monthlyMaxHours) return false;
-            const maxAllowedDays = s.allowedWeeklyWorkDays?.length
-              ? Math.max(...s.allowedWeeklyWorkDays)
-              : 99;
-            if ((staffWeeklyWorkDaysCount[s.id]?.[day.weekIndex] || 0) >= maxAllowedDays) return false;
+            const targetDays = partTimeWeeklyTargets[s.id]?.[day.weekIndex];
+            const currentDays = staffWeeklyWorkDaysCount[s.id]?.[day.weekIndex] || 0;
+            if (currentWeekHours + nightHours > PART_TIME_WEEKLY_HOURS_LIMIT) return false;
+            if (targetDays !== undefined && currentDays >= targetDays) return false;
           }
 
           return true;
@@ -253,10 +319,11 @@ export function generateAutomatedSchedule(
           isRequested: false,
         };
         staffNightCounts[selected.id] = (staffNightCounts[selected.id] || 0) + 1;
-        staffWorkHours[selected.id] += 16;
+        const nightHours = getStaffShiftWorkHours(selected, plan.shiftTypes.NIGHT);
+        staffWorkHours[selected.id] += nightHours;
         if (!staffWeeklyWorkHours[selected.id]) staffWeeklyWorkHours[selected.id] = {};
         staffWeeklyWorkHours[selected.id][day.weekIndex] =
-          (staffWeeklyWorkHours[selected.id][day.weekIndex] || 0) + 16;
+          (staffWeeklyWorkHours[selected.id][day.weekIndex] || 0) + nightHours;
         staffWeeklyWorkDaysCount[selected.id][day.weekIndex] =
           (staffWeeklyWorkDaysCount[selected.id][day.weekIndex] || 0) + 1;
 
@@ -337,15 +404,12 @@ export function generateAutomatedSchedule(
       if (staff.employmentType !== 'PART_TIME') return false;
       const currentDays = staffWeeklyWorkDaysCount[staff.id]?.[day.weekIndex] || 0;
       const currentWeekHours = staffWeeklyWorkHours[staff.id]?.[day.weekIndex] || 0;
-      const weekMax = staff.weeklyMaxHours || 40;
-      const targetDays = staff.allowedWeeklyWorkDays?.length
-        ? Math.min(...staff.allowedWeeklyWorkDays)
-        : Math.floor(weekMax / 8);
+      const dailyHours = getPartTimeDailyWorkHours(staff);
+      const targetDays = partTimeWeeklyTargets[staff.id]?.[day.weekIndex] ?? 99;
 
       return (
         currentDays < targetDays &&
-        currentWeekHours + 8 <= weekMax &&
-        staffWorkHours[staff.id] + 8 <= staff.monthlyMaxHours
+        currentWeekHours + dailyHours <= PART_TIME_WEEKLY_HOURS_LIMIT
       );
     };
 
@@ -415,36 +479,42 @@ export function generateAutomatedSchedule(
       // パート: 週単位（最大40h）および週の勤務日数制限チェック
       // 正社員: 週休2日ペース、月単位の契約上限時間および所定労働時間の進度チェック
       if (staff.employmentType === 'PART_TIME') {
-        const weekMax = staff.weeklyMaxHours || 40;
+        const weekMax = PART_TIME_WEEKLY_HOURS_LIMIT;
         const currentWeekHours = staffWeeklyWorkHours[staff.id]?.[day.weekIndex] || 0;
-        const shiftHours = plan.shiftTypes[shiftId]?.workHours ?? 8;
-        if (
-          currentWeekHours + shiftHours > weekMax ||
-          staffWorkHours[staff.id] + shiftHours > staff.monthlyMaxHours
-        ) {
-          if (!allowLimitOverrides) return -9999;
-          score -= 500 +
-            Math.max(0, currentWeekHours + shiftHours - weekMax) * 20 +
-            Math.max(0, staffWorkHours[staff.id] + shiftHours - staff.monthlyMaxHours) * 20;
+        const shiftHours = getStaffShiftWorkHours(staff, plan.shiftTypes[shiftId]);
+        const targetDays = partTimeWeeklyTargets[staff.id]?.[day.weekIndex];
+        const currentDays = staffWeeklyWorkDaysCount[staff.id]?.[day.weekIndex] || 0;
+
+        // 週40h上限チェック
+        if (currentWeekHours + shiftHours > weekMax) {
+          return -9999;
         }
 
-        score += 60;
-
-        // 週の勤務日数（複数選択可）の上限チェック
-        if (staff.allowedWeeklyWorkDays && staff.allowedWeeklyWorkDays.length > 0) {
-          const maxAllowedDays = Math.max(...staff.allowedWeeklyWorkDays);
-          const currentDays = staffWeeklyWorkDaysCount[staff.id]?.[day.weekIndex] || 0;
-          if (currentDays >= maxAllowedDays) {
-            if (!allowLimitOverrides) return -9999;
-            score -= 500 + (currentDays - maxAllowedDays + 1) * 100;
-          }
-          const minAllowedDays = Math.min(...staff.allowedWeeklyWorkDays);
-          if (currentDays < minAllowedDays) {
-            score += (minAllowedDays - currentDays) * 30;
-          }
+        // 週の目標勤務日数に達している場合は出勤不可（週の勤務日数を厳守）
+        if (targetDays !== undefined && currentDays >= targetDays) {
+          return -9999;
         }
 
-        score += (weekMax - currentWeekHours) * 2;
+        // 当該週の残り日数を確認し、スタッフ管理画面の週勤務日数を最優先で達成
+        const weekDays = daysByWeek.get(day.weekIndex) || [];
+        const pastDaysInWeek = weekDays.filter((d) => d.date <= day.date);
+        const remainingDaysInWeek = weekDays.length - pastDaysInWeek.length;
+        const daysNeededThisWeek = targetDays !== undefined ? targetDays - currentDays : 0;
+
+        if (daysNeededThisWeek > 0) {
+          // 今日出勤しないと週目標に届かない場合は最優先
+          if (remainingDaysInWeek + 1 <= daysNeededThisWeek) {
+            score += 200;
+          } else {
+            score += 40;
+            // 連勤を避けて週全体に分散配置
+            if (consec >= 1) {
+              score -= 30;
+            } else {
+              score += 25;
+            }
+          }
+        }
       } else {
         const hoursRemaining = staff.monthlyMaxHours - staffWorkHours[staff.id];
         if (hoursRemaining < 8) {
@@ -452,15 +522,39 @@ export function generateAutomatedSchedule(
           score -= 500 + (8 - hoursRemaining) * 20;
         }
 
-        // 正社員: 週休2日ペースの管理（週5日勤務を上限とする）
+        // 正社員: 週休2日ペースの管理（各週で休日2日前後、週上限勤務日数の遵守）
+        const weekTarget = fullTimeWeeklyHolidayTargets[day.weekIndex] || { targetHolidays: 2, maxWorkDays: 5 };
         const currentWeeklyDays = staffWeeklyWorkDaysCount[staff.id]?.[day.weekIndex] || 0;
-        if (currentWeeklyDays >= 5) {
+        if (currentWeeklyDays >= weekTarget.maxWorkDays) {
           if (!allowLimitOverrides) return -9999;
-          score -= 500 + (currentWeeklyDays - 4) * 100;
-        } else if (currentWeeklyDays === 4) {
-          score -= 80; // すでに週4日出勤している場合は休日を強く推奨
-        } else if (currentWeeklyDays <= 2) {
+          score -= 500 + (currentWeeklyDays - weekTarget.maxWorkDays + 1) * 100;
+        } else if (currentWeeklyDays === weekTarget.maxWorkDays - 1) {
+          score -= 80; // あと1日で週上限に達する場合は休日を強く推奨
+        } else if (currentWeeklyDays <= 1) {
           score += 25;
+        }
+
+        // 当該週における確定済み休日数と残り日数を算出して週休2日ペースを誘導
+        const weekDays = daysByWeek.get(day.weekIndex) || [];
+        const pastDaysInWeek = weekDays.filter((d) => d.date <= day.date);
+        const remainingDaysInWeek = weekDays.length - pastDaysInWeek.length;
+        let confirmedHolidaysInWeek = 0;
+        pastDaysInWeek.forEach((d) => {
+          const assign = newAssignments[`${staff.id}_${d.date}`];
+          if (assign && (assign.shiftTypeId === 'HOLIDAY' || assign.shiftTypeId === 'PAID_LEAVE')) {
+            confirmedHolidaysInWeek++;
+          }
+        });
+
+        if (confirmedHolidaysInWeek >= weekTarget.targetHolidays) {
+          // すでに週目標休日数（2日など）を確保済みの場合は出勤しやすくする（週休過多の防止）
+          score += 35;
+        } else {
+          // まだ週目標休日数に達していない場合、残り日数で休日を確保できるか確認
+          if (remainingDaysInWeek + 1 <= (weekTarget.targetHolidays - confirmedHolidaysInWeek)) {
+            // 今日休まないと目標休日数を確保できなくなるため、出勤を抑止して休日を優先
+            score -= 120;
+          }
         }
 
         // 月の所定労働時間の進度ペース（前倒し勤務の防止・月全体への均等化）
@@ -547,10 +641,11 @@ export function generateAutomatedSchedule(
         };
         addDayShiftCount(chosen.id, shiftId);
 
-        staffWorkHours[chosen.id] += 8;
+        const workHours = getStaffShiftWorkHours(chosen, plan.shiftTypes[shiftId]);
+        staffWorkHours[chosen.id] += workHours;
         if (!staffWeeklyWorkHours[chosen.id]) staffWeeklyWorkHours[chosen.id] = {};
         staffWeeklyWorkHours[chosen.id][day.weekIndex] =
-          (staffWeeklyWorkHours[chosen.id][day.weekIndex] || 0) + 8;
+          (staffWeeklyWorkHours[chosen.id][day.weekIndex] || 0) + workHours;
 
         if (!staffWeeklyWorkDaysCount[chosen.id]) staffWeeklyWorkDaysCount[chosen.id] = {};
         staffWeeklyWorkDaysCount[chosen.id][day.weekIndex] =
@@ -603,13 +698,14 @@ export function generateAutomatedSchedule(
           (staffWorkHours[staff.id] + 8 <= expectedHoursToDate + 4 && fullTimeDaysInWeek < 4 && consec <= 1)
         );
 
+      const weekTarget = fullTimeWeeklyHolidayTargets[day.weekIndex] || { targetHolidays: 2, maxWorkDays: 5 };
       const canAddExtraDayShift =
         !isPartTime &&
         needsShiftForTargetHours &&
         !prevDayWasNightNext &&
         !monthlyOver &&
         consec < 3 &&
-        fullTimeDaysInWeek < 5;
+        fullTimeDaysInWeek < weekTarget.maxWorkDays;
 
       if (canAddExtraDayShift) {
         // 追加日勤
@@ -645,11 +741,167 @@ export function generateAutomatedSchedule(
         if (targetShift === 'HOLIDAY') {
           staffHolidayCounts[staff.id] = (staffHolidayCounts[staff.id] || 0) + 1;
         } else {
-          staffWorkHours[staff.id] += 8;
+          staffWorkHours[staff.id] += getStaffShiftWorkHours(
+            staff,
+            plan.shiftTypes[targetShift]
+          );
         }
       }
     });
   });
+
+  // パートの週勤務日数に不足があれば、空いている公休日に追加割り当てする
+  plan.staffList
+    .filter((staff) => staff.employmentType === 'PART_TIME')
+    .forEach((staff) => {
+      const weeklyTargets = partTimeWeeklyTargets[staff.id];
+      if (!weeklyTargets) return;
+
+      daysByWeek.forEach((weekDays, weekIndex) => {
+        const targetDays = weeklyTargets[weekIndex];
+        let currentDays = staffWeeklyWorkDaysCount[staff.id]?.[weekIndex] || 0;
+
+        while (currentDays < targetDays) {
+          const candidates = weekDays
+            .map((day) => {
+              const dayIndex = days.findIndex((monthDay) => monthDay.date === day.date);
+              const key = `${staff.id}_${day.date}`;
+              const assignment = newAssignments[key];
+              if (
+                assignment?.shiftTypeId !== 'HOLIDAY' ||
+                assignment.isLocked ||
+                assignment.isRequested
+              ) {
+                return null;
+              }
+
+              const fixedDayShift = staff.fixedDayShifts?.[day.dayOfWeekIndex];
+              const shiftId = fixedDayShift || staff.fixedShiftType || 'DAY';
+              if (
+                shiftId === 'HOLIDAY' ||
+                (shiftId !== 'DAY' && shiftId !== 'EARLY' && shiftId !== 'LATE')
+              ) {
+                return null;
+              }
+
+              const shift = plan.shiftTypes[shiftId];
+              const workHours = getStaffShiftWorkHours(staff, shift);
+              const currentWeekHours = staffWeeklyWorkHours[staff.id]?.[weekIndex] || 0;
+              if (
+                !shift?.isWork ||
+                currentWeekHours + workHours > PART_TIME_WEEKLY_HOURS_LIMIT
+              ) {
+                return null;
+              }
+
+              if (
+                plan.rules.enableNgPairCheck &&
+                staff.ngStaffIds?.some((ngStaffId) =>
+                  Object.values(newAssignments).some(
+                    (other) =>
+                      other.date === day.date &&
+                      other.shiftTypeId === shiftId &&
+                      other.staffId === ngStaffId
+                  )
+                )
+              ) {
+                return null;
+              }
+
+              if (dayIndex > 0) {
+                const previousShiftId =
+                  newAssignments[`${staff.id}_${days[dayIndex - 1].date}`]?.shiftTypeId;
+                if (previousShiftId === 'NIGHT_NEXT') return null;
+              }
+
+              let consecutiveDays = 1;
+              for (let index = dayIndex - 1; index >= 0; index--) {
+                const previousShiftId =
+                  newAssignments[`${staff.id}_${days[index].date}`]?.shiftTypeId;
+                if (!previousShiftId || previousShiftId === 'HOLIDAY' || previousShiftId === 'NIGHT_NEXT') break;
+                consecutiveDays++;
+              }
+              for (let index = dayIndex + 1; index < days.length; index++) {
+                const nextShiftId =
+                  newAssignments[`${staff.id}_${days[index].date}`]?.shiftTypeId;
+                if (!nextShiftId || nextShiftId === 'HOLIDAY' || nextShiftId === 'NIGHT_NEXT') break;
+                consecutiveDays++;
+              }
+              if (consecutiveDays > plan.rules.maxConsecutiveWorkDays) return null;
+
+              return { day, key, shiftId, workHours, random: Math.random() };
+            })
+            .filter(
+              (
+                candidate
+              ): candidate is {
+                day: (typeof days)[number];
+                key: string;
+                shiftId: 'DAY' | 'EARLY' | 'LATE';
+                workHours: number;
+                random: number;
+              } => candidate !== null
+            )
+            .sort((a, b) => a.random - b.random);
+
+          const chosen = candidates[0];
+          if (!chosen) break;
+
+          newAssignments[chosen.key] = {
+            staffId: staff.id,
+            date: chosen.day.date,
+            shiftTypeId: chosen.shiftId,
+            isLocked: false,
+            isRequested: false,
+          };
+          addDayShiftCount(staff.id, chosen.shiftId);
+          staffWorkHours[staff.id] += chosen.workHours;
+          staffWeeklyWorkHours[staff.id][weekIndex] =
+            (staffWeeklyWorkHours[staff.id][weekIndex] || 0) + chosen.workHours;
+          staffWeeklyWorkDaysCount[staff.id][weekIndex] = currentDays + 1;
+          currentDays++;
+          staffHolidayCounts[staff.id] = Math.max(0, (staffHolidayCounts[staff.id] || 0) - 1);
+          if (chosen.day.isWeekend) {
+            staffWeekendCounts[staff.id] = (staffWeekendCounts[staff.id] || 0) + 1;
+          }
+        }
+
+        // 週目標日数を超過している場合、余分な出勤（ロック・希望・曜日固定でない日勤等）を休日に戻す
+        while (currentDays > targetDays) {
+          const excessCandidates = weekDays
+            .map((day) => {
+              const key = `${staff.id}_${day.date}`;
+              const assignment = newAssignments[key];
+              if (!assignment || assignment.isLocked || assignment.isRequested) return null;
+              if (assignment.shiftTypeId === 'HOLIDAY' || assignment.shiftTypeId === 'NIGHT_NEXT') return null;
+              if (staff.fixedDayShifts?.[day.dayOfWeekIndex]) return null;
+              return { day, key, shiftTypeId: assignment.shiftTypeId };
+            })
+            .filter((c): c is NonNullable<typeof c> => c !== null);
+
+          const chosenExcess = excessCandidates[excessCandidates.length - 1];
+          if (!chosenExcess) break;
+
+          newAssignments[chosenExcess.key] = {
+            staffId: staff.id,
+            date: chosenExcess.day.date,
+            shiftTypeId: 'HOLIDAY',
+            isLocked: false,
+            isRequested: false,
+          };
+          const shift = plan.shiftTypes[chosenExcess.shiftTypeId];
+          const workHours = shift ? getStaffShiftWorkHours(staff, shift) : 8;
+          staffWorkHours[staff.id] -= workHours;
+          staffWeeklyWorkHours[staff.id][weekIndex] = Math.max(
+            0,
+            (staffWeeklyWorkHours[staff.id][weekIndex] || 0) - workHours
+          );
+          staffWeeklyWorkDaysCount[staff.id][weekIndex] = currentDays - 1;
+          currentDays--;
+          staffHolidayCounts[staff.id] = (staffHolidayCounts[staff.id] || 0) + 1;
+        }
+      });
+    });
 
   // 4. 正社員の労働時間を常勤所定労働時間（targetMonthlyHours）に完全合致させる事後調整パス
   const fullTimeStaff = plan.staffList.filter((s) => s.employmentType === 'FULL_TIME');
@@ -689,9 +941,17 @@ export function generateAutomatedSchedule(
             }
 
             // 週の勤務日数
+            const weekTarget = fullTimeWeeklyHolidayTargets[day.weekIndex] || { targetHolidays: 2, maxWorkDays: 5 };
             const weekDays = staffWeeklyWorkDaysCount[staff.id]?.[day.weekIndex] || 0;
-            const maxWeekAllowed = pass === 0 ? 5 : 6;
+            const maxWeekAllowed = pass === 0 ? weekTarget.maxWorkDays : weekTarget.maxWorkDays + 1;
             if (weekDays >= maxWeekAllowed) return null;
+
+            // 週の現在の休日数（HOLIDAY + PAID_LEAVE）
+            const weekDaysList = daysByWeek.get(day.weekIndex) || [];
+            const weeklyHolidays = weekDaysList.filter((d) => {
+              const a = newAssignments[`${staff.id}_${d.date}`];
+              return a && (a.shiftTypeId === 'HOLIDAY' || a.shiftTypeId === 'PAID_LEAVE');
+            }).length;
 
             // 連勤チェック
             let forwardCount = 0;
@@ -709,8 +969,15 @@ export function generateAutomatedSchedule(
             const totalConsec = backwardCount + 1 + forwardCount;
             if (totalConsec > plan.rules.maxConsecutiveWorkDays) return null;
 
-            // スコアリング（連勤が短く、週出勤が少ない日を優先）
-            const score = (5 - weekDays) * 20 - totalConsec * 10;
+            // スコアリング（休日が目標より多い週を最優先で出勤に変更。2日以下の週は極力維持）
+            let holidayScore = 0;
+            if (weeklyHolidays > weekTarget.targetHolidays) {
+              holidayScore += (weeklyHolidays - weekTarget.targetHolidays) * 80;
+            } else {
+              holidayScore -= 120;
+            }
+
+            const score = holidayScore + (weekTarget.maxWorkDays - weekDays) * 20 - totalConsec * 10;
             return { day, dIdx, score };
           })
           .filter((item): item is { day: (typeof days)[0]; dIdx: number; score: number } => item !== null)
@@ -718,6 +985,24 @@ export function generateAutomatedSchedule(
 
         for (const candidate of candidateDays) {
           if (daysNeeded <= 0) break;
+
+          // 変更直前に最新の状態で連勤チェック
+          let fCount = 0;
+          for (let f = candidate.dIdx + 1; f < days.length; f++) {
+            const fShift = newAssignments[`${staff.id}_${days[f].date}`]?.shiftTypeId;
+            if (fShift && fShift !== 'HOLIDAY' && fShift !== 'NIGHT_NEXT') fCount++;
+            else break;
+          }
+          let bCount = 0;
+          for (let b = candidate.dIdx - 1; b >= 0; b--) {
+            const bShift = newAssignments[`${staff.id}_${days[b].date}`]?.shiftTypeId;
+            if (bShift && bShift !== 'HOLIDAY' && bShift !== 'NIGHT_NEXT') bCount++;
+            else break;
+          }
+          if (bCount + 1 + fCount > plan.rules.maxConsecutiveWorkDays) {
+            continue;
+          }
+
           const key = `${staff.id}_${candidate.day.date}`;
           newAssignments[key] = {
             staffId: staff.id,
@@ -766,8 +1051,24 @@ export function generateAutomatedSchedule(
           const totalWorking = dayAssignments.length;
           const weekDays = staffWeeklyWorkDaysCount[staff.id]?.[day.weekIndex] || 0;
 
+          // 週の現在の休日数（HOLIDAY + PAID_LEAVE）
+          const weekTarget = fullTimeWeeklyHolidayTargets[day.weekIndex] || { targetHolidays: 2, maxWorkDays: 5 };
+          const weekDaysList = daysByWeek.get(day.weekIndex) || [];
+          const weeklyHolidays = weekDaysList.filter((d) => {
+            const a = newAssignments[`${staff.id}_${d.date}`];
+            return a && (a.shiftTypeId === 'HOLIDAY' || a.shiftTypeId === 'PAID_LEAVE');
+          }).length;
+
+          // スコア: その週の休日が少ない（目標以下）週を最優先で休みにする
+          let holidayBonus = 0;
+          if (weeklyHolidays < weekTarget.targetHolidays) {
+            holidayBonus += (weekTarget.targetHolidays - weeklyHolidays) * 80;
+          } else if (weeklyHolidays >= weekTarget.targetHolidays) {
+            holidayBonus -= 80; // すでに目標休日数があるならこれ以上増やさない
+          }
+
           // スコア: 現場人数が多い日ほど安全、週勤務日数が多いほど休みにしたい
-          const score = totalWorking * 20 + weekDays * 15;
+          const score = holidayBonus + totalWorking * 20 + weekDays * 15;
           return { day, dIdx, assign, score };
         })
         .filter(
@@ -808,6 +1109,120 @@ export function generateAutomatedSchedule(
         }
         daysToRemove--;
       }
+    }
+  });
+
+  // 5. 正社員の各週休日平準化スワップパス（完全週の休日が2日前後になるよう平準化）
+  fullTimeStaff.forEach((staff) => {
+    const getWeekHolidays = (weekIdx: number) => {
+      const wDays = daysByWeek.get(weekIdx) || [];
+      return wDays.filter((d) => {
+        const a = newAssignments[`${staff.id}_${d.date}`];
+        return a && (a.shiftTypeId === 'HOLIDAY' || a.shiftTypeId === 'PAID_LEAVE');
+      }).length;
+    };
+
+    const checkConsecutiveOk = (targetDayIdx: number, newShiftId: ShiftTypeId): boolean => {
+      let forwardCount = 0;
+      for (let f = targetDayIdx + 1; f < days.length; f++) {
+        const fShift = f === targetDayIdx ? newShiftId : newAssignments[`${staff.id}_${days[f].date}`]?.shiftTypeId;
+        if (fShift && fShift !== 'HOLIDAY' && fShift !== 'NIGHT_NEXT') forwardCount++;
+        else break;
+      }
+      let backwardCount = 0;
+      for (let b = targetDayIdx - 1; b >= 0; b--) {
+        const bShift = b === targetDayIdx ? newShiftId : newAssignments[`${staff.id}_${days[b].date}`]?.shiftTypeId;
+        if (bShift && bShift !== 'HOLIDAY' && bShift !== 'NIGHT_NEXT') backwardCount++;
+        else break;
+      }
+      const totalConsec = newShiftId === 'HOLIDAY' ? 0 : backwardCount + 1 + forwardCount;
+      return totalConsec <= plan.rules.maxConsecutiveWorkDays;
+    };
+
+    for (let iter = 0; iter < 5; iter++) {
+      let surplusWeek: number | null = null;
+      let deficitWeek: number | null = null;
+
+      daysByWeek.forEach((_wDays, wIdx) => {
+        const target = fullTimeWeeklyHolidayTargets[wIdx]?.targetHolidays ?? 2;
+        const holidays = getWeekHolidays(wIdx);
+        if (holidays > target && surplusWeek === null) {
+          surplusWeek = wIdx;
+        } else if (holidays < target && deficitWeek === null) {
+          deficitWeek = wIdx;
+        }
+      });
+
+      if (surplusWeek === null || deficitWeek === null) break;
+
+      // surplusWeek の中から DAY に変更可能な HOLIDAY を探索
+      const surplusDays = daysByWeek.get(surplusWeek) || [];
+      const holidayCandidates = surplusDays
+        .map((d) => {
+          const dIdx = days.findIndex((mDay) => mDay.date === d.date);
+          const key = `${staff.id}_${d.date}`;
+          const assign = newAssignments[key];
+          if (!assign || assign.shiftTypeId !== 'HOLIDAY' || assign.isLocked || assign.isRequested) {
+            return null;
+          }
+          if (dIdx > 0) {
+            const prevShift = newAssignments[`${staff.id}_${days[dIdx - 1].date}`]?.shiftTypeId;
+            if (prevShift === 'NIGHT_NEXT' || prevShift === 'NIGHT') return null;
+          }
+          if (dIdx < days.length - 1) {
+            const nextShift = newAssignments[`${staff.id}_${days[dIdx + 1].date}`]?.shiftTypeId;
+            if (nextShift === 'NIGHT_NEXT') return null;
+          }
+          if (!checkConsecutiveOk(dIdx, 'DAY')) return null;
+          return { day: d, dIdx, key };
+        })
+        .filter((c): c is { day: (typeof days)[0]; dIdx: number; key: string } => c !== null);
+
+      // deficitWeek の中から HOLIDAY に変更可能な DAY/EARLY/LATE を探索
+      const deficitDays = daysByWeek.get(deficitWeek) || [];
+      const workCandidates = deficitDays
+        .map((d) => {
+          const dIdx = days.findIndex((mDay) => mDay.date === d.date);
+          const key = `${staff.id}_${d.date}`;
+          const assign = newAssignments[key];
+          if (!assign || assign.isLocked || assign.isRequested) return null;
+          if (assign.shiftTypeId !== 'DAY' && assign.shiftTypeId !== 'EARLY' && assign.shiftTypeId !== 'LATE') {
+            return null;
+          }
+          const dayWorking = Object.values(newAssignments).filter(
+            (a) => a.date === d.date && a.shiftTypeId !== 'HOLIDAY' && a.shiftTypeId !== 'NIGHT_NEXT'
+          ).length;
+          return { day: d, dIdx, key, dayWorking };
+        })
+        .filter((c): c is { day: (typeof days)[0]; dIdx: number; key: string; dayWorking: number } => c !== null)
+        .sort((a, b) => b.dayWorking - a.dayWorking);
+
+      if (holidayCandidates.length === 0 || workCandidates.length === 0) break;
+
+      const toWork = holidayCandidates[0];
+      const toHoliday = workCandidates[0];
+
+      newAssignments[toWork.key] = {
+        staffId: staff.id,
+        date: toWork.day.date,
+        shiftTypeId: 'DAY',
+        isLocked: false,
+        isRequested: false,
+      };
+      newAssignments[toHoliday.key] = {
+        staffId: staff.id,
+        date: toHoliday.day.date,
+        shiftTypeId: 'HOLIDAY',
+        isLocked: false,
+        isRequested: false,
+      };
+
+      staffWeeklyWorkDaysCount[staff.id][surplusWeek] =
+        (staffWeeklyWorkDaysCount[staff.id][surplusWeek] || 0) + 1;
+      staffWeeklyWorkDaysCount[staff.id][deficitWeek] = Math.max(
+        0,
+        (staffWeeklyWorkDaysCount[staff.id][deficitWeek] || 0) - 1
+      );
     }
   });
 
