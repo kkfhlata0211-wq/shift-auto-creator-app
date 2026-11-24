@@ -1,5 +1,5 @@
 import React from 'react';
-import { Play, Sparkles, Download, Upload, FileSpreadsheet, RotateCcw, AlertTriangle, Users, Sliders } from 'lucide-react';
+import { Play, Sparkles, Download, Upload, FileSpreadsheet, RotateCcw, AlertTriangle, Users, Sliders, ChevronDown, ChevronUp } from 'lucide-react';
 import { MonthlySchedulePlan } from '../types/shift';
 import { exportPlanAsCsv, exportPlanAsJson } from '../utils/storage';
 
@@ -29,6 +29,7 @@ export const Header: React.FC<HeaderProps> = ({
   isGenerating = false,
 }) => {
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const [isMinimized, setIsMinimized] = React.useState(false);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -46,6 +47,38 @@ export const Header: React.FC<HeaderProps> = ({
     reader.readAsText(file);
     e.target.value = '';
   };
+
+  if (isMinimized) {
+    return (
+      <header className="bg-white border-b border-slate-200 px-4 py-2 shadow-sm">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-2">
+            <div className="rounded-lg bg-blue-600 p-1.5 text-white">
+              <Sparkles className="h-4 w-4" />
+            </div>
+            <h1 className="truncate text-sm font-bold text-slate-800">シフト自動作成</h1>
+            <span className="text-xs font-semibold text-slate-500">{plan.yearMonth}</span>
+            {violationCount > 0 && (
+              <span className="rounded-md bg-rose-50 px-2 py-1 text-xs font-semibold text-rose-700">
+                違反・警告 {violationCount}件
+              </span>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsMinimized(false)}
+            aria-expanded={false}
+            aria-label="ヘッダーを展開"
+            title="ヘッダーを展開"
+            className="flex shrink-0 items-center gap-1 rounded-lg border border-slate-300 bg-slate-100 px-2.5 py-1.5 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-200"
+          >
+            <ChevronDown className="h-4 w-4" />
+            <span>展開</span>
+          </button>
+        </div>
+      </header>
+    );
+  }
 
   return (
     <header className="bg-white border-b border-slate-200 px-6 py-4 shadow-sm">
@@ -196,6 +229,17 @@ export const Header: React.FC<HeaderProps> = ({
             className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
           >
             <RotateCcw className="w-4 h-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsMinimized(true)}
+            aria-expanded={true}
+            aria-label="ヘッダーを最小化"
+            title="ヘッダーを最小化"
+            className="flex shrink-0 items-center gap-1 rounded-lg border border-slate-300 bg-slate-100 px-2.5 py-1.5 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-200"
+          >
+            <ChevronUp className="h-4 w-4" />
+            <span>最小化</span>
           </button>
         </div>
       </div>

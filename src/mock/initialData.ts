@@ -22,8 +22,8 @@ export const DEFAULT_SHIFT_TYPES: Record<ShiftTypeId, ShiftType> = {
     endTime: '16:00',
     workHours: 8,
     fteWeight: 1.0,
-    color: 'bg-amber-100 text-amber-800 border-amber-300',
-    textColor: '#92400e',
+    color: 'bg-lime-100 text-lime-800 border-lime-300',
+    textColor: '#3f6212',
     isWork: true,
     isNight: false,
   },
@@ -193,6 +193,7 @@ export const INITIAL_STAFF: Staff[] = [
 export const DEFAULT_RULES: ConstraintRules = {
   maxConsecutiveWorkDays: 4, // 最大4連勤まで
   nightShiftNextRule: 'HOLIDAY_OR_NEXT',
+  nightShiftLinkRule: 'night_next_holiday',
   enableNgPairCheck: true,
   balanceWeekendShifts: true,
   balanceNightShifts: true,

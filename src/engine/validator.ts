@@ -1,4 +1,9 @@
-import { MonthlySchedulePlan, RuleViolation, ShiftTypeId } from '../types/shift';
+import {
+  getNightShiftLinkRule,
+  MonthlySchedulePlan,
+  RuleViolation,
+  ShiftTypeId,
+} from '../types/shift';
 import { getDaysInMonth } from '../utils/dateUtils';
 
 export interface ValidationSummary {
@@ -27,6 +32,8 @@ export interface ValidationSummary {
     requiredNight: number;
     actualNight: number;
     isDeficit: boolean;
+    requiredByShift: Partial<Record<ShiftTypeId, number>>;
+    actualByShift: Partial<Record<ShiftTypeId, number>>;
   }>;
 }
 
@@ -41,6 +48,7 @@ export function validateSchedule(
   const dailyCoverageSummary: ValidationSummary['dailyCoverageSummary'] = {};
 
   const days = getDaysInMonth(plan.yearMonth);
+  const nightShiftLinkRule = getNightShiftLinkRule(plan.rules);
   const staffMap = new Map(plan.staffList.map((s) => [s.id, s]));
 
   const addViolation = (violation: RuleViolation) => {
@@ -128,7 +136,7 @@ export function validateSchedule(
       }
 
       // 夜勤翌日チェック（夜勤の翌日は公休または明番）
-      if (shiftId === 'NIGHT' && index < days.length - 1) {
+      if (shiftId === 'NIGHT' && nightShiftLinkRule !== 'none' && index < days.length - 1) {
         const nextDay = days[index + 1];
         const nextKey = `${staff.id}_${nextDay.date}`;
         const nextShiftId = plan.assignments[nextKey]?.shiftTypeId;
@@ -152,7 +160,11 @@ export function validateSchedule(
       }
 
       // 明けの翌日チェック（明番の翌日は休日とする）
-      if (shiftId === 'NIGHT_NEXT' && index < days.length - 1) {
+      if (
+        shiftId === 'NIGHT_NEXT' &&
+        nightShiftLinkRule === 'night_next_holiday' &&
+        index < days.length - 1
+      ) {
         const nextDay = days[index + 1];
         const nextKey = `${staff.id}_${nextDay.date}`;
         const nextShiftId = plan.assignments[nextKey]?.shiftTypeId;
@@ -286,12 +298,8 @@ export function validateSchedule(
 
   // 2. 日付ごとのチェック（必要人数・NGペア）
   days.forEach((day) => {
-    let dayCount = 0;
-    let earlyCount = 0;
-    let lateCount = 0;
-    let nightCount = 0;
-
     const assignedStaffByShift: Partial<Record<ShiftTypeId, string[]>> = {};
+    const actualByShift: Partial<Record<ShiftTypeId, number>> = {};
 
     plan.staffList.forEach((staff) => {
       const key = `${staff.id}_${day.date}`;
@@ -300,11 +308,7 @@ export function validateSchedule(
 
       if (!assignedStaffByShift[shiftId]) assignedStaffByShift[shiftId] = [];
       assignedStaffByShift[shiftId]!.push(staff.id);
-
-      if (shiftId === 'DAY') dayCount++;
-      if (shiftId === 'EARLY') earlyCount++;
-      if (shiftId === 'LATE') lateCount++;
-      if (shiftId === 'NIGHT') nightCount++;
+      actualByShift[shiftId] = (actualByShift[shiftId] || 0) + 1;
     });
 
     // 必要人員（設定値から動的取得）: 早番, 日勤, 遅番, 夜勤
@@ -312,12 +316,29 @@ export function validateSchedule(
     const reqDay = plan.rules.defaultRequirements?.DAY ?? 2;
     const reqLate = plan.rules.defaultRequirements?.LATE ?? 1;
     const reqNight = plan.rules.defaultRequirements?.NIGHT ?? 1;
+    const requiredByShift: Partial<Record<ShiftTypeId, number>> = {
+      EARLY: reqEarly,
+      DAY: reqDay,
+      LATE: reqLate,
+      NIGHT: reqNight,
+    };
+    Object.values(plan.shiftTypes).forEach((shiftType) => {
+      if (
+        !['EARLY', 'DAY', 'LATE', 'NIGHT', 'NIGHT_NEXT', 'HOLIDAY', 'PAID_LEAVE'].includes(shiftType.id) &&
+        shiftType.isWork
+      ) {
+        requiredByShift[shiftType.id] = shiftType.requiredStaff ?? 0;
+      }
+    });
 
-    const isDeficit =
-      earlyCount < reqEarly ||
-      dayCount < reqDay ||
-      lateCount < reqLate ||
-      nightCount < reqNight;
+    const earlyCount = actualByShift.EARLY || 0;
+    const dayCount = actualByShift.DAY || 0;
+    const lateCount = actualByShift.LATE || 0;
+    const nightCount = actualByShift.NIGHT || 0;
+
+    const isDeficit = Object.entries(requiredByShift).some(
+      ([shiftId, required]) => (actualByShift[shiftId] || 0) < (required || 0)
+    );
 
     dailyCoverageSummary[day.date] = {
       requiredDay: reqDay,
@@ -329,14 +350,19 @@ export function validateSchedule(
       requiredNight: reqNight,
       actualNight: nightCount,
       isDeficit,
+      requiredByShift,
+      actualByShift,
     };
 
     if (isDeficit) {
       const shortages: string[] = [];
-      if (earlyCount < reqEarly) shortages.push(`早番(${earlyCount}/${reqEarly})`);
-      if (dayCount < reqDay) shortages.push(`日勤(${dayCount}/${reqDay})`);
-      if (lateCount < reqLate) shortages.push(`遅番(${lateCount}/${reqLate})`);
-      if (nightCount < reqNight) shortages.push(`夜勤(${nightCount}/${reqNight})`);
+      Object.entries(requiredByShift).forEach(([shiftId, required]) => {
+        const actual = actualByShift[shiftId] || 0;
+        if (actual < (required || 0)) {
+          const name = plan.shiftTypes[shiftId]?.name || shiftId;
+          shortages.push(`${name}(${actual}/${required})`);
+        }
+      });
 
       addViolation({
         id: `v_shortage_${day.date}`,

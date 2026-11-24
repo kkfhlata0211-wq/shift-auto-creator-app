@@ -1,4 +1,10 @@
-import { MonthlySchedulePlan, ShiftAssignment, ShiftTypeId, Staff } from '../types/shift';
+import {
+  getNightShiftLinkRule,
+  MonthlySchedulePlan,
+  ShiftAssignment,
+  ShiftTypeId,
+  Staff,
+} from '../types/shift';
 import { getDaysInMonth } from '../utils/dateUtils';
 import {
   getPartTimeDailyWorkHours,
@@ -19,8 +25,10 @@ export function generateAutomatedSchedule(
   options: GenerationOptions = { preserveLocked: true }
 ): Record<string, ShiftAssignment> {
   const days = getDaysInMonth(plan.yearMonth);
+  const nightShiftLinkRule = getNightShiftLinkRule(plan.rules);
   const newAssignments: Record<string, ShiftAssignment> = {};
   const generationWarnings: string[] = [];
+  const staffingShortageWarnings: { date: string; shiftId: ShiftTypeId; message: string }[] = [];
   const shuffle = <T>(items: T[]): T[] => {
     const shuffled = [...items];
     for (let index = shuffled.length - 1; index > 0; index--) {
@@ -32,6 +40,26 @@ export function generateAutomatedSchedule(
   const addGenerationWarning = (message: string) => {
     generationWarnings.push(message);
   };
+  const builtInShiftTypeIds = new Set([
+    'EARLY',
+    'DAY',
+    'LATE',
+    'NIGHT',
+    'NIGHT_NEXT',
+    'HOLIDAY',
+    'PAID_LEAVE',
+  ]);
+  const isAutomaticCustomShiftEnabled = (shiftId: ShiftTypeId): boolean => {
+    if (builtInShiftTypeIds.has(shiftId)) return true;
+    const shiftType = plan.shiftTypes[shiftId];
+    return Boolean(shiftType?.isWork && !shiftType.isNight && (shiftType.requiredStaff ?? 0) > 0);
+  };
+  const countsAsWorkDay = (shiftId?: ShiftTypeId): boolean =>
+    Boolean(shiftId && plan.shiftTypes[shiftId]?.isWork) || shiftId === 'PAID_LEAVE';
+  const countsAsHoliday = (shiftId?: ShiftTypeId): boolean =>
+    shiftId === 'HOLIDAY' ||
+    shiftId === 'PAID_LEAVE' ||
+    Boolean(shiftId && shiftId !== 'NIGHT_NEXT' && plan.shiftTypes[shiftId] && !plan.shiftTypes[shiftId].isWork);
   const previousMonthStats = getPreviousMonthWorkStats(
     plan.yearMonth,
     plan.staffList,
@@ -67,7 +95,12 @@ export function generateAutomatedSchedule(
       days.forEach((day) => {
         const fixedShiftId = staff.fixedDayShifts![day.dayOfWeekIndex];
         const key = `${staff.id}_${day.date}`;
-        if (fixedShiftId && !newAssignments[key]) {
+        if (
+          fixedShiftId &&
+          isAutomaticCustomShiftEnabled(fixedShiftId) &&
+          !newAssignments[key] &&
+          (!staff.availableShiftTypes || staff.availableShiftTypes.includes(fixedShiftId))
+        ) {
           newAssignments[key] = {
             staffId: staff.id,
             date: day.date,
@@ -207,7 +240,7 @@ export function generateAutomatedSchedule(
     const shift = plan.shiftTypes[assign.shiftTypeId];
     addDayShiftCount(assign.staffId, assign.shiftTypeId);
     addMonthlyShiftCount(assign.staffId, assign.shiftTypeId);
-    if (assign.shiftTypeId === 'HOLIDAY' || assign.shiftTypeId === 'PAID_LEAVE') {
+    if (countsAsHoliday(assign.shiftTypeId)) {
       staffHolidayCounts[assign.staffId] = (staffHolidayCounts[assign.staffId] || 0) + 1;
     }
     if (shift?.isWork) {
@@ -233,7 +266,7 @@ export function generateAutomatedSchedule(
       const d = days[i];
       const key = `${staffId}_${d.date}`;
       const shiftId = newAssignments[key]?.shiftTypeId;
-      if (shiftId && shiftId !== 'HOLIDAY' && shiftId !== 'NIGHT_NEXT') {
+      if (countsAsWorkDay(shiftId)) {
         count++;
       } else {
         break;
@@ -249,7 +282,7 @@ export function generateAutomatedSchedule(
       const d = days[i];
       const key = `${staffId}_${d.date}`;
       const shiftId = newAssignments[key]?.shiftTypeId;
-      if (shiftId === 'HOLIDAY' || shiftId === 'PAID_LEAVE') {
+      if (countsAsHoliday(shiftId)) {
         count++;
       } else {
         break;
@@ -272,7 +305,44 @@ export function generateAutomatedSchedule(
 
   // 3. 夜勤（NIGHT）と明番（NIGHT_NEXT）の先行割り当て
   // 夜勤可能スタッフ間で回数を平準化
-  const nightEligibleStaff = plan.staffList.filter((s) => s.canNightShift);
+  const nightEligibleStaff = plan.staffList.filter(
+    (staff) =>
+      staff.canNightShift &&
+      (!staff.availableShiftTypes || staff.availableShiftTypes.includes('NIGHT'))
+  );
+
+  const applyNightLink = (staff: Staff, nightDayIndex: number) => {
+    if (nightShiftLinkRule === 'none') return;
+
+    if (nightDayIndex < days.length - 1) {
+      const nextDay = days[nightDayIndex + 1];
+      const nextKey = `${staff.id}_${nextDay.date}`;
+      if (!newAssignments[nextKey]) {
+        newAssignments[nextKey] = {
+          staffId: staff.id,
+          date: nextDay.date,
+          shiftTypeId: 'NIGHT_NEXT',
+          isLocked: false,
+          isRequested: false,
+        };
+      }
+    }
+
+    if (nightShiftLinkRule === 'night_next_holiday' && nightDayIndex < days.length - 2) {
+      const dayAfterNext = days[nightDayIndex + 2];
+      const dayAfterNextKey = `${staff.id}_${dayAfterNext.date}`;
+      if (!newAssignments[dayAfterNextKey]) {
+        newAssignments[dayAfterNextKey] = {
+          staffId: staff.id,
+          date: dayAfterNext.date,
+          shiftTypeId: 'HOLIDAY',
+          isLocked: false,
+          isRequested: false,
+        };
+        staffHolidayCounts[staff.id] = (staffHolidayCounts[staff.id] || 0) + 1;
+      }
+    }
+  };
 
   days.forEach((day, dayIndex) => {
     // 既に夜勤が割り当てられているか確認
@@ -280,6 +350,9 @@ export function generateAutomatedSchedule(
       const key = `${s.id}_${day.date}`;
       return newAssignments[key]?.shiftTypeId === 'NIGHT';
     });
+    if (existingNightStaff) {
+      applyNightLink(existingNightStaff, dayIndex);
+    }
 
     if (!existingNightStaff && nightEligibleStaff.length > 0) {
       // 候補スタッフの選定（連勤数、翌日の空き、累計夜勤数でソート）
@@ -295,20 +368,24 @@ export function generateAutomatedSchedule(
           const daysSinceNight = getDaysSinceLastNight(s.id, dayIndex);
           if (daysSinceNight < 4) return false;
 
-          // 翌日にロックされた出勤がないか確認（夜勤翌日は明番または公休・有休）
-          if (dayIndex < days.length - 1) {
+          // 明番または休みの割当が必要なルールでは、翌日の確定勤務と衝突させない
+          if (nightShiftLinkRule !== 'none' && dayIndex < days.length - 1) {
             const nextDay = days[dayIndex + 1];
             const nextKey = `${s.id}_${nextDay.date}`;
             const nextAssign = newAssignments[nextKey];
             if (nextAssign) {
-              if (nextAssign.shiftTypeId !== 'HOLIDAY' && nextAssign.shiftTypeId !== 'PAID_LEAVE') {
+              if (
+                nextAssign.shiftTypeId !== 'NIGHT_NEXT' &&
+                nextAssign.shiftTypeId !== 'HOLIDAY' &&
+                nextAssign.shiftTypeId !== 'PAID_LEAVE'
+              ) {
                 return false;
               }
             }
           }
 
-          // 明けの翌日（2日後）にロックされた出勤がないか確認（明けの次の日は休日）
-          if (dayIndex < days.length - 2) {
+          // 夜→明→休を固定する場合だけ、翌々日の確定勤務と衝突させない
+          if (nightShiftLinkRule === 'night_next_holiday' && dayIndex < days.length - 2) {
             const dayAfterNext = days[dayIndex + 2];
             const dayAfterNextKey = `${s.id}_${dayAfterNext.date}`;
             const dayAfterNextAssign = newAssignments[dayAfterNextKey];
@@ -353,49 +430,7 @@ export function generateAutomatedSchedule(
         staffWeeklyWorkDaysCount[selected.id][day.weekIndex] =
           (staffWeeklyWorkDaysCount[selected.id][day.weekIndex] || 0) + 1;
 
-        // 翌日は明番（または希望休が既にあればそのまま）
-        if (dayIndex < days.length - 1) {
-          const nextDay = days[dayIndex + 1];
-          const nextKey = `${selected.id}_${nextDay.date}`;
-          if (!newAssignments[nextKey]) {
-            newAssignments[nextKey] = {
-              staffId: selected.id,
-              date: nextDay.date,
-              shiftTypeId: 'NIGHT_NEXT',
-              isLocked: false,
-              isRequested: false,
-            };
-          }
-        }
-
-        // 明けの次の日は休（HOLIDAY）。有休（PAID_LEAVE）の希望がある場合はそちらを優先
-        if (dayIndex < days.length - 2) {
-          const dayAfterNext = days[dayIndex + 2];
-          const dayAfterNextKey = `${selected.id}_${dayAfterNext.date}`;
-          const existingAssign = newAssignments[dayAfterNextKey];
-          const hasPaidLeaveReq = plan.requests.some(
-            (r) => r.staffId === selected.id && r.date === dayAfterNext.date && r.requestedShiftId === 'PAID_LEAVE'
-          );
-
-          if (hasPaidLeaveReq || existingAssign?.shiftTypeId === 'PAID_LEAVE') {
-            newAssignments[dayAfterNextKey] = {
-              staffId: selected.id,
-              date: dayAfterNext.date,
-              shiftTypeId: 'PAID_LEAVE',
-              isLocked: existingAssign?.isLocked || false,
-              isRequested: true,
-            };
-          } else if (!existingAssign) {
-            newAssignments[dayAfterNextKey] = {
-              staffId: selected.id,
-              date: dayAfterNext.date,
-              shiftTypeId: 'HOLIDAY',
-              isLocked: false,
-              isRequested: false,
-            };
-            staffHolidayCounts[selected.id] = (staffHolidayCounts[selected.id] || 0) + 1;
-          }
-        }
+        applyNightLink(selected, dayIndex);
       } else if ((plan.rules.defaultRequirements?.NIGHT ?? 1) > 0) {
         addGenerationWarning(
           `${day.date}: 夜勤の条件を満たすスタッフがいないため、夜勤を割り当てられませんでした。`
@@ -428,6 +463,17 @@ export function generateAutomatedSchedule(
       ...Array(Math.max(0, reqEarly - (assignedShiftCounts.EARLY || 0))).fill('EARLY'),
       ...Array(Math.max(0, reqDay - (assignedShiftCounts.DAY || 0))).fill('DAY'),
       ...Array(Math.max(0, reqLate - (assignedShiftCounts.LATE || 0))).fill('LATE'),
+      ...Object.values(plan.shiftTypes)
+        .filter((shiftType) =>
+          !['DAY', 'EARLY', 'LATE', 'NIGHT', 'NIGHT_NEXT', 'HOLIDAY', 'PAID_LEAVE'].includes(shiftType.id) &&
+          shiftType.isWork &&
+          !shiftType.isNight &&
+          (shiftType.requiredStaff ?? 0) > 0
+        )
+        .flatMap((shiftType) =>
+          Array(Math.max(0, (shiftType.requiredStaff ?? 0) - (assignedShiftCounts[shiftType.id] || 0)))
+            .fill(shiftType.id)
+        ),
     ];
 
     // 既に割当済みのスタッフを除外
@@ -456,14 +502,24 @@ export function generateAutomatedSchedule(
       allowLimitOverrides = false
     ): number => {
       let score = 0;
+      const shiftHours = getStaffShiftWorkHours(staff, plan.shiftTypes[shiftId]);
       const consec = getConsecutiveDaysBefore(staff.id, dayIndex);
       const consecHolidays = getConsecutiveHolidaysBefore(staff.id, dayIndex);
+      let consecAfter = 0;
+      for (let index = dayIndex + 1; index < days.length; index++) {
+        const nextShift = newAssignments[`${staff.id}_${days[index].date}`]?.shiftTypeId;
+        if (!countsAsWorkDay(nextShift)) break;
+        consecAfter++;
+      }
 
       // 明けの次の日は休とする（前日が明番の場合は出勤不可）
       if (dayIndex > 0) {
         const prevDay = days[dayIndex - 1];
         const prevKey = `${staff.id}_${prevDay.date}`;
-        if (newAssignments[prevKey]?.shiftTypeId === 'NIGHT_NEXT') {
+        if (
+          nightShiftLinkRule === 'night_next_holiday' &&
+          newAssignments[prevKey]?.shiftTypeId === 'NIGHT_NEXT'
+        ) {
           return -9999;
         }
       }
@@ -475,11 +531,12 @@ export function generateAutomatedSchedule(
         }
       }
 
-      // 連勤上限チェック
-      if (consec >= plan.rules.maxConsecutiveWorkDays) {
-        if (!allowLimitOverrides) return -9999;
-        score -= 500 + (consec - plan.rules.maxConsecutiveWorkDays + 1) * 100;
+      if (staff.availableShiftTypes && !staff.availableShiftTypes.includes(shiftId)) {
+        return -9999;
       }
+
+      // 連勤上限チェック
+      if (consec + 1 + consecAfter > plan.rules.maxConsecutiveWorkDays) return -9999;
 
       // 連勤・休日の自然なリズム（2〜3勤1休ペース）
       if (consec === 0) {
@@ -517,7 +574,6 @@ export function generateAutomatedSchedule(
       if (staff.employmentType === 'PART_TIME') {
         const weekMax = PART_TIME_WEEKLY_HOURS_LIMIT;
         const currentWeekHours = staffWeeklyWorkHours[staff.id]?.[day.weekIndex] || 0;
-        const shiftHours = getStaffShiftWorkHours(staff, plan.shiftTypes[shiftId]);
         const targetDays = partTimeWeeklyTargets[staff.id]?.[day.weekIndex];
         const currentDays = staffWeeklyWorkDaysCount[staff.id]?.[day.weekIndex] || 0;
 
@@ -554,7 +610,7 @@ export function generateAutomatedSchedule(
       } else {
         const monthlyMaxHours = staff.monthlyMaxHours ?? 168;
         const hoursRemaining = monthlyMaxHours - staffWorkHours[staff.id];
-        if (staff.monthlyMaxHours !== undefined && staff.monthlyMaxHours > 0 && hoursRemaining < 8) {
+        if (staff.monthlyMaxHours !== undefined && staff.monthlyMaxHours > 0 && hoursRemaining < shiftHours) {
           if (!allowLimitOverrides) return -9999;
           score -= 500 + (8 - hoursRemaining) * 20;
         }
@@ -578,7 +634,7 @@ export function generateAutomatedSchedule(
         let confirmedHolidaysInWeek = 0;
         pastDaysInWeek.forEach((d) => {
           const assign = newAssignments[`${staff.id}_${d.date}`];
-          if (assign && (assign.shiftTypeId === 'HOLIDAY' || assign.shiftTypeId === 'PAID_LEAVE')) {
+          if (assign && countsAsHoliday(assign.shiftTypeId)) {
             confirmedHolidaysInWeek++;
           }
         });
@@ -600,7 +656,7 @@ export function generateAutomatedSchedule(
             ? plan.targetMonthlyHours
             : (staff.monthlyMaxHours ?? 168);
         const expectedHoursToDate = targetHours * dayProgress;
-        const hourDiff = (staffWorkHours[staff.id] + 8) - expectedHoursToDate;
+        const hourDiff = (staffWorkHours[staff.id] + shiftHours) - expectedHoursToDate;
 
         if (hourDiff > 8) {
           // 進度より働きすぎている場合は減点して休日を促す
@@ -611,9 +667,9 @@ export function generateAutomatedSchedule(
         }
 
         // 目標所定労働時間を超える場合は通常割り当て禁止（所定労働時間厳守）
-        if (staffWorkHours[staff.id] + 8 > targetHours) {
+        if (staffWorkHours[staff.id] + shiftHours > targetHours) {
           if (!allowLimitOverrides) return -9999;
-          score -= 500 + (staffWorkHours[staff.id] + 8 - targetHours) * 30;
+          score -= 500 + (staffWorkHours[staff.id] + shiftHours - targetHours) * 30;
         }
       }
 
@@ -623,7 +679,7 @@ export function generateAutomatedSchedule(
       }
 
       // 早番・日勤・遅番の担当回数をシフトごとに平準化
-      score -= getDayShiftCount(staff.id, shiftId) * 40;
+      score -= getMonthlyShiftCount(staff.id, shiftId) * 40;
 
       // 希望する勤務形態ボーナス
       if (staff.preferredShiftTypes?.includes(shiftId)) {
@@ -713,9 +769,9 @@ export function generateAutomatedSchedule(
         const idx = unassignedStaff.findIndex((s) => s.id === chosen.id);
         if (idx !== -1) unassignedStaff.splice(idx, 1);
       } else {
-        addGenerationWarning(
-          `${day.date}: ${plan.shiftTypes[shiftId]?.name || shiftId}の必要人数を満たせませんでした。`
-        );
+        const message = `${day.date}: ${plan.shiftTypes[shiftId]?.name || shiftId}の必要人数を満たせませんでした。`;
+        staffingShortageWarnings.push({ date: day.date, shiftId, message });
+        addGenerationWarning(message);
       }
     });
 
@@ -726,6 +782,7 @@ export function generateAutomatedSchedule(
 
       // 前日が明番の場合、明けの次は休（有休希望があれば有休優先）
       const prevDayWasNightNext =
+        nightShiftLinkRule === 'night_next_holiday' &&
         dayIndex > 0 &&
         newAssignments[`${staff.id}_${days[dayIndex - 1].date}`]?.shiftTypeId === 'NIGHT_NEXT';
 
@@ -770,6 +827,7 @@ export function generateAutomatedSchedule(
       const canAddExtraDayShift =
         !isPartTime &&
         needsShiftForTargetHours &&
+        (!staff.availableShiftTypes || staff.availableShiftTypes.includes('DAY')) &&
         !prevDayWasNightNext &&
         !monthlyOver &&
         consec < 3 &&
@@ -844,13 +902,21 @@ export function generateAutomatedSchedule(
               }
 
               const fixedDayShift = staff.fixedDayShifts?.[day.dayOfWeekIndex];
-              const shiftId = fixedDayShift || staff.fixedShiftType || 'DAY';
-              if (
-                shiftId === 'HOLIDAY' ||
-                (shiftId !== 'DAY' && shiftId !== 'EARLY' && shiftId !== 'LATE')
-              ) {
+              const fallbackShift = staff.availableShiftTypes?.includes('DAY')
+                ? 'DAY'
+                : staff.availableShiftTypes?.find(
+                    (id) =>
+                      plan.shiftTypes[id]?.isWork &&
+                      !plan.shiftTypes[id]?.isNight &&
+                      id !== 'PAID_LEAVE' &&
+                      isAutomaticCustomShiftEnabled(id)
+                  );
+              const shiftId = fixedDayShift || staff.fixedShiftType || fallbackShift || 'DAY';
+              if (shiftId === 'HOLIDAY' || !plan.shiftTypes[shiftId]?.isWork || plan.shiftTypes[shiftId]?.isNight) {
                 return null;
               }
+              if (!isAutomaticCustomShiftEnabled(shiftId)) return null;
+              if (staff.availableShiftTypes && !staff.availableShiftTypes.includes(shiftId)) return null;
 
               const shift = plan.shiftTypes[shiftId];
               const workHours = getStaffShiftWorkHours(staff, shift);
@@ -879,7 +945,10 @@ export function generateAutomatedSchedule(
               if (dayIndex > 0) {
                 const previousShiftId =
                   newAssignments[`${staff.id}_${days[dayIndex - 1].date}`]?.shiftTypeId;
-                if (previousShiftId === 'NIGHT_NEXT') return null;
+                if (
+                  nightShiftLinkRule === 'night_next_holiday' &&
+                  previousShiftId === 'NIGHT_NEXT'
+                ) return null;
               }
 
               let consecutiveDays = 1;
@@ -905,7 +974,7 @@ export function generateAutomatedSchedule(
               ): candidate is {
                 day: (typeof days)[number];
                 key: string;
-                shiftId: 'DAY' | 'EARLY' | 'LATE';
+                shiftId: ShiftTypeId;
                 workHours: number;
               } => candidate !== null
             );
@@ -940,13 +1009,17 @@ export function generateAutomatedSchedule(
               const key = `${staff.id}_${day.date}`;
               const assignment = newAssignments[key];
               if (!assignment || assignment.isLocked || assignment.isRequested) return null;
-              if (
-                assignment.shiftTypeId !== 'DAY' &&
-                assignment.shiftTypeId !== 'EARLY' &&
-                assignment.shiftTypeId !== 'LATE'
-              ) {
+              const assignmentShift = plan.shiftTypes[assignment.shiftTypeId];
+              if (!assignmentShift?.isWork || assignmentShift.isNight || assignment.shiftTypeId === 'PAID_LEAVE') {
                 return null;
               }
+              const assignedOfType = Object.values(newAssignments).filter(
+                (other) => other.date === day.date && other.shiftTypeId === assignment.shiftTypeId
+              ).length;
+              if (
+                !['DAY', 'EARLY', 'LATE'].includes(assignment.shiftTypeId) &&
+                assignedOfType <= (assignmentShift.requiredStaff ?? 0)
+              ) return null;
               if (staff.fixedDayShifts?.[day.dayOfWeekIndex]) return null;
               return { day, key, shiftTypeId: assignment.shiftTypeId };
             })
@@ -1009,19 +1082,23 @@ export function generateAutomatedSchedule(
             if (!assign || assign.shiftTypeId !== 'HOLIDAY' || assign.isLocked || assign.isRequested) {
               return null;
             }
+            if (staff.availableShiftTypes && !staff.availableShiftTypes.includes('DAY')) return null;
 
             // 前日が夜勤または明番の場合は不可（夜勤サイクル保護）
             if (dIdx > 0) {
               const prevKey = `${staff.id}_${days[dIdx - 1].date}`;
               const prevShift = newAssignments[prevKey]?.shiftTypeId;
-              if (prevShift === 'NIGHT_NEXT' || prevShift === 'NIGHT') return null;
+              if (
+                (nightShiftLinkRule !== 'none' && prevShift === 'NIGHT') ||
+                (nightShiftLinkRule === 'night_next_holiday' && prevShift === 'NIGHT_NEXT')
+              ) return null;
             }
 
             // 翌日が明番の場合は不可
             if (dIdx < days.length - 1) {
               const nextKey = `${staff.id}_${days[dIdx + 1].date}`;
               const nextShift = newAssignments[nextKey]?.shiftTypeId;
-              if (nextShift === 'NIGHT_NEXT') return null;
+              if (nightShiftLinkRule !== 'none' && nextShift === 'NIGHT_NEXT') return null;
             }
 
             // 週の勤務日数
@@ -1034,7 +1111,7 @@ export function generateAutomatedSchedule(
             const weekDaysList = daysByWeek.get(day.weekIndex) || [];
             const weeklyHolidays = weekDaysList.filter((d) => {
               const a = newAssignments[`${staff.id}_${d.date}`];
-              return a && (a.shiftTypeId === 'HOLIDAY' || a.shiftTypeId === 'PAID_LEAVE');
+              return a && countsAsHoliday(a.shiftTypeId);
             }).length;
 
             // 連勤チェック
@@ -1142,7 +1219,7 @@ export function generateAutomatedSchedule(
           const weekDaysList = daysByWeek.get(day.weekIndex) || [];
           const weeklyHolidays = weekDaysList.filter((d) => {
             const a = newAssignments[`${staff.id}_${d.date}`];
-            return a && (a.shiftTypeId === 'HOLIDAY' || a.shiftTypeId === 'PAID_LEAVE');
+            return a && countsAsHoliday(a.shiftTypeId);
           }).length;
 
           // スコア: その週の休日が少ない（目標以下）週を最優先で休みにする
@@ -1211,7 +1288,7 @@ export function generateAutomatedSchedule(
       const wDays = daysByWeek.get(weekIdx) || [];
       return wDays.filter((d) => {
         const a = newAssignments[`${staff.id}_${d.date}`];
-        return a && (a.shiftTypeId === 'HOLIDAY' || a.shiftTypeId === 'PAID_LEAVE');
+        return a && countsAsHoliday(a.shiftTypeId);
       }).length;
     };
 
@@ -1260,11 +1337,14 @@ export function generateAutomatedSchedule(
           }
           if (dIdx > 0) {
             const prevShift = newAssignments[`${staff.id}_${days[dIdx - 1].date}`]?.shiftTypeId;
-            if (prevShift === 'NIGHT_NEXT' || prevShift === 'NIGHT') return null;
+            if (
+              (nightShiftLinkRule !== 'none' && prevShift === 'NIGHT') ||
+              (nightShiftLinkRule === 'night_next_holiday' && prevShift === 'NIGHT_NEXT')
+            ) return null;
           }
           if (dIdx < days.length - 1) {
             const nextShift = newAssignments[`${staff.id}_${days[dIdx + 1].date}`]?.shiftTypeId;
-            if (nextShift === 'NIGHT_NEXT') return null;
+            if (nightShiftLinkRule !== 'none' && nextShift === 'NIGHT_NEXT') return null;
           }
           if (!checkConsecutiveOk(dIdx, 'DAY')) return null;
           return { day: d, dIdx, key };
@@ -1327,6 +1407,705 @@ export function generateAutomatedSchedule(
         );
       }
     });
+  });
+
+  // 6. 同日の余剰シフトから不足シフトへ振り替え、必要人数を補う
+  const requiredByShift: Partial<Record<ShiftTypeId, number>> = {
+    EARLY: plan.rules.defaultRequirements?.EARLY ?? 1,
+    DAY: plan.rules.defaultRequirements?.DAY ?? 2,
+    LATE: plan.rules.defaultRequirements?.LATE ?? 1,
+    NIGHT: plan.rules.defaultRequirements?.NIGHT ?? 1,
+  };
+  const customWorkShifts = Object.values(plan.shiftTypes).filter(
+    (shiftType) =>
+      !builtInShiftTypeIds.has(shiftType.id) &&
+      shiftType.isWork &&
+      !shiftType.isNight
+  );
+  customWorkShifts.forEach((shiftType) => {
+    requiredByShift[shiftType.id] = shiftType.requiredStaff ?? 0;
+  });
+
+  const parseShiftTime = (time: string): number | null => {
+    const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(time);
+    return match ? Number(match[1]) * 60 + Number(match[2]) : null;
+  };
+  const getShiftTimeRange = (shiftId: ShiftTypeId) => {
+    const shiftType = plan.shiftTypes[shiftId];
+    if (!shiftType) return null;
+    const start = parseShiftTime(shiftType.startTime);
+    const end = parseShiftTime(shiftType.endTime);
+    if (start === null || end === null) return null;
+    return { start, end: end <= start ? end + 1440 : end };
+  };
+  const getAssignedShiftId = (
+    staffId: string,
+    dayIndex: number,
+    overrides: Record<string, ShiftTypeId> = {}
+  ): ShiftTypeId | undefined => {
+    const key = `${staffId}_${days[dayIndex].date}`;
+    return overrides[key] ?? newAssignments[key]?.shiftTypeId;
+  };
+  const hasRequiredRest = (
+    staffId: string,
+    dayIndex: number,
+    shiftId: ShiftTypeId,
+    overrides: Record<string, ShiftTypeId> = {}
+  ): boolean => {
+    const minimumRest = plan.rules.minRestHoursBetweenShifts;
+    if (minimumRest <= 0) return true;
+    const targetRange = getShiftTimeRange(shiftId);
+    if (!targetRange) return false;
+
+    if (dayIndex > 0) {
+      const previousShiftId = getAssignedShiftId(staffId, dayIndex - 1, overrides);
+      const previousShift = previousShiftId ? plan.shiftTypes[previousShiftId] : undefined;
+      if (previousShift?.isWork && previousShiftId !== 'PAID_LEAVE' && previousShiftId) {
+        const previousRange = getShiftTimeRange(previousShiftId);
+        if (!previousRange || 24 * 60 + targetRange.start - previousRange.end < minimumRest * 60) {
+          return false;
+        }
+      }
+    }
+
+    if (dayIndex < days.length - 1) {
+      const nextShiftId = getAssignedShiftId(staffId, dayIndex + 1, overrides);
+      const nextShift = nextShiftId ? plan.shiftTypes[nextShiftId] : undefined;
+      if (nextShift?.isWork && nextShiftId !== 'PAID_LEAVE' && nextShiftId) {
+        const nextRange = getShiftTimeRange(nextShiftId);
+        if (!nextRange || 24 * 60 + nextRange.start - targetRange.end < minimumRest * 60) {
+          return false;
+        }
+      }
+    }
+    return true;
+  };
+  const canKeepNightLink = (
+    staff: Staff,
+    dayIndex: number,
+    targetShiftId: ShiftTypeId,
+    overrides: Record<string, ShiftTypeId> = {}
+  ): boolean => {
+    const previousShiftId =
+      dayIndex > 0
+        ? getAssignedShiftId(staff.id, dayIndex - 1, overrides)
+        : undefined;
+    const nextShiftId =
+      dayIndex < days.length - 1
+        ? getAssignedShiftId(staff.id, dayIndex + 1, overrides)
+        : undefined;
+
+    if (targetShiftId !== 'NIGHT') {
+      if (
+        nightShiftLinkRule !== 'none' &&
+        previousShiftId === 'NIGHT'
+      ) return false;
+      if (
+        nightShiftLinkRule === 'night_next_holiday' &&
+        previousShiftId === 'NIGHT_NEXT'
+      ) return false;
+      if (nightShiftLinkRule !== 'none' && nextShiftId === 'NIGHT_NEXT') return false;
+      return true;
+    }
+
+    if (!staff.canNightShift || getDaysSinceLastNight(staff.id, dayIndex) < 4) return false;
+    for (let index = dayIndex + 1; index < days.length; index++) {
+      if (
+        getAssignedShiftId(staff.id, index, overrides) === 'NIGHT' &&
+        index - dayIndex < 4
+      ) return false;
+    }
+
+    if (nightShiftLinkRule === 'none') return true;
+    const nextAssignmentKey =
+      dayIndex < days.length - 1
+        ? `${staff.id}_${days[dayIndex + 1].date}`
+        : undefined;
+    const nextAssignment = nextAssignmentKey ? newAssignments[nextAssignmentKey] : undefined;
+    const nextAssignmentShiftId = nextAssignmentKey ? overrides[nextAssignmentKey] ?? nextAssignment?.shiftTypeId : undefined;
+    if (
+      nextAssignment &&
+      nextAssignmentShiftId !== 'NIGHT_NEXT' &&
+      nextAssignmentShiftId !== 'PAID_LEAVE' &&
+      !(
+        nextAssignmentShiftId === 'HOLIDAY' &&
+        !nextAssignment.isLocked &&
+        !nextAssignment.isRequested
+      )
+    ) return false;
+
+    if (nightShiftLinkRule === 'night_next_holiday' && dayIndex < days.length - 2) {
+      const dayAfterKey = `${staff.id}_${days[dayIndex + 2].date}`;
+      const dayAfterAssignment = newAssignments[dayAfterKey];
+      const dayAfterShiftId = overrides[dayAfterKey] ?? dayAfterAssignment?.shiftTypeId;
+      if (
+        dayAfterAssignment &&
+        dayAfterShiftId !== 'HOLIDAY' &&
+        dayAfterShiftId !== 'PAID_LEAVE'
+      ) return false;
+    }
+    return true;
+  };
+
+  days.forEach((day, dayIndex) => {
+    const shiftCounts: Partial<Record<ShiftTypeId, number>> = {};
+    plan.staffList.forEach((staff) => {
+      const shiftId = newAssignments[`${staff.id}_${day.date}`]?.shiftTypeId;
+      if (shiftId) shiftCounts[shiftId] = (shiftCounts[shiftId] || 0) + 1;
+    });
+
+    const targetShiftIds: ShiftTypeId[] = [
+      'EARLY',
+      'LATE',
+      'NIGHT',
+      ...customWorkShifts.map((shiftType) => shiftType.id),
+    ];
+
+    targetShiftIds.forEach((targetShiftId) => {
+      const requiredCount = requiredByShift[targetShiftId] ?? 0;
+      while ((shiftCounts[targetShiftId] || 0) < requiredCount) {
+        const sources = Object.keys(requiredByShift)
+          .filter((sourceShiftId) => {
+            const sourceRequired = requiredByShift[sourceShiftId] ?? 0;
+            return (shiftCounts[sourceShiftId] || 0) > sourceRequired;
+          })
+          .sort(
+            (first, second) =>
+              (shiftCounts[second] || 0) - (requiredByShift[second] || 0) -
+              ((shiftCounts[first] || 0) - (requiredByShift[first] || 0))
+          );
+        let reassignment:
+          | { staff: Staff; sourceShiftId: ShiftTypeId; sourceHours: number; targetHours: number }
+          | undefined;
+
+        for (const sourceShiftId of sources) {
+          const sourceShift = plan.shiftTypes[sourceShiftId];
+          const targetShift = plan.shiftTypes[targetShiftId];
+          if (!sourceShift?.isWork || sourceShift.isNight || !targetShift?.isWork) continue;
+
+          const candidates = orderByMonthlyShiftCount(
+            plan.staffList.filter((staff) => {
+              const key = `${staff.id}_${day.date}`;
+              const assignment = newAssignments[key];
+              if (
+                !assignment ||
+                assignment.shiftTypeId !== sourceShiftId ||
+                assignment.isLocked ||
+                assignment.isRequested
+              ) return false;
+              if (staff.availableShiftTypes && !staff.availableShiftTypes.includes(targetShiftId)) {
+                return false;
+              }
+              if (
+                staff.employmentType === 'PART_TIME' &&
+                staff.fixedShiftType &&
+                staff.fixedShiftType !== targetShiftId
+              ) return false;
+              const fixedDayShift = staff.fixedDayShifts?.[day.dayOfWeekIndex];
+              if (fixedDayShift && fixedDayShift !== targetShiftId) return false;
+              if (targetShiftId === 'NIGHT' && !staff.canNightShift) return false;
+
+              if (
+                plan.rules.enableNgPairCheck &&
+                staff.ngStaffIds?.some((ngStaffId) =>
+                  plan.staffList.some((otherStaff) =>
+                    otherStaff.id === ngStaffId &&
+                    newAssignments[`${otherStaff.id}_${day.date}`]?.shiftTypeId === targetShiftId
+                  )
+                )
+              ) return false;
+
+              if (!canKeepNightLink(staff, dayIndex, targetShiftId)) return false;
+              if (!hasRequiredRest(staff.id, dayIndex, targetShiftId)) return false;
+
+              const sourceHours = getStaffShiftWorkHours(staff, sourceShift);
+              const targetHours = getStaffShiftWorkHours(staff, targetShift);
+              const hourDifference = targetHours - sourceHours;
+              if (
+                staff.employmentType === 'PART_TIME' &&
+                (staffWeeklyWorkHours[staff.id]?.[day.weekIndex] || 0) + hourDifference >
+                  PART_TIME_WEEKLY_HOURS_LIMIT
+              ) return false;
+              if (staff.employmentType === 'FULL_TIME') {
+                const monthlyLimit =
+                  plan.targetMonthlyHours && plan.targetMonthlyHours > 0
+                    ? plan.targetMonthlyHours
+                    : (staff.monthlyMaxHours ?? 168);
+                if ((staffWorkHours[staff.id] || 0) + hourDifference > monthlyLimit) return false;
+              }
+              return true;
+            }),
+            targetShiftId
+          );
+          const staff = candidates[0];
+          if (staff) {
+            reassignment = {
+              staff,
+              sourceShiftId,
+              sourceHours: getStaffShiftWorkHours(staff, sourceShift),
+              targetHours: getStaffShiftWorkHours(staff, targetShift),
+            };
+            break;
+          }
+        }
+
+        if (!reassignment) break;
+
+        const { staff, sourceShiftId, sourceHours, targetHours } = reassignment;
+        const key = `${staff.id}_${day.date}`;
+        newAssignments[key] = {
+          ...newAssignments[key],
+          shiftTypeId: targetShiftId,
+        };
+        shiftCounts[sourceShiftId] = (shiftCounts[sourceShiftId] || 0) - 1;
+        shiftCounts[targetShiftId] = (shiftCounts[targetShiftId] || 0) + 1;
+        removeMonthlyShiftCount(staff.id, sourceShiftId);
+        addMonthlyShiftCount(staff.id, targetShiftId);
+        if (sourceShiftId === 'EARLY' || sourceShiftId === 'DAY' || sourceShiftId === 'LATE') {
+          staffDayShiftCounts[staff.id][sourceShiftId] = Math.max(
+            0,
+            getDayShiftCount(staff.id, sourceShiftId) - 1
+          );
+        }
+        addDayShiftCount(staff.id, targetShiftId);
+        const hourDifference = targetHours - sourceHours;
+        staffWorkHours[staff.id] += hourDifference;
+        staffWeeklyWorkHours[staff.id][day.weekIndex] =
+          (staffWeeklyWorkHours[staff.id][day.weekIndex] || 0) + hourDifference;
+
+        if (targetShiftId === 'NIGHT' && nightShiftLinkRule !== 'none') {
+          if (dayIndex < days.length - 1) {
+            const nextKey = `${staff.id}_${days[dayIndex + 1].date}`;
+            if (
+              newAssignments[nextKey]?.shiftTypeId === 'HOLIDAY' &&
+              !newAssignments[nextKey].isLocked &&
+              !newAssignments[nextKey].isRequested
+            ) {
+              newAssignments[nextKey] = {
+                ...newAssignments[nextKey],
+                shiftTypeId: 'NIGHT_NEXT',
+              };
+              staffHolidayCounts[staff.id] = Math.max(
+                0,
+                (staffHolidayCounts[staff.id] || 0) - 1
+              );
+            } else if (!newAssignments[nextKey]) {
+              newAssignments[nextKey] = {
+                staffId: staff.id,
+                date: days[dayIndex + 1].date,
+                shiftTypeId: 'NIGHT_NEXT',
+                isLocked: false,
+                isRequested: false,
+              };
+            }
+          }
+          if (nightShiftLinkRule === 'night_next_holiday' && dayIndex < days.length - 2) {
+            const dayAfterNextKey = `${staff.id}_${days[dayIndex + 2].date}`;
+            if (!newAssignments[dayAfterNextKey]) {
+              newAssignments[dayAfterNextKey] = {
+                staffId: staff.id,
+                date: days[dayIndex + 2].date,
+                shiftTypeId: 'HOLIDAY',
+                isLocked: false,
+                isRequested: false,
+              };
+              staffHolidayCounts[staff.id] = (staffHolidayCounts[staff.id] || 0) + 1;
+            }
+          }
+        }
+      }
+    });
+  });
+
+  // 7. 別日の余剰シフトと公休を入れ替え、同日調整で残った不足を補う
+  const crossDateTargetShiftIds: ShiftTypeId[] = [
+    'EARLY',
+    'LATE',
+    'NIGHT',
+    ...customWorkShifts.map((shiftType) => shiftType.id),
+  ];
+  const getDayShiftCounts = (date: string): Partial<Record<ShiftTypeId, number>> => {
+    const counts: Partial<Record<ShiftTypeId, number>> = {};
+    plan.staffList.forEach((staff) => {
+      const shiftId = newAssignments[`${staff.id}_${date}`]?.shiftTypeId;
+      if (shiftId) counts[shiftId] = (counts[shiftId] || 0) + 1;
+    });
+    return counts;
+  };
+  const getStaffWeekHolidayCount = (staffId: string, weekIndex: number): number =>
+    (daysByWeek.get(weekIndex) || []).filter((weekDay) =>
+      countsAsHoliday(newAssignments[`${staffId}_${weekDay.date}`]?.shiftTypeId)
+    ).length;
+  const getConsecutiveWorkDaysAfterSwap = (
+    staffId: string,
+    dayIndex: number,
+    overrides: Record<string, ShiftTypeId>
+  ): number => {
+    let consecutiveDays = 1;
+    for (let index = dayIndex - 1; index >= 0; index--) {
+      if (!countsAsWorkDay(getAssignedShiftId(staffId, index, overrides))) break;
+      consecutiveDays++;
+    }
+    for (let index = dayIndex + 1; index < days.length; index++) {
+      if (!countsAsWorkDay(getAssignedShiftId(staffId, index, overrides))) break;
+      consecutiveDays++;
+    }
+    return consecutiveDays;
+  };
+  const canAssignCoverageShift = (
+    staff: Staff,
+    day: (typeof days)[number],
+    shiftId: ShiftTypeId
+  ): boolean => {
+    if (staff.availableShiftTypes && !staff.availableShiftTypes.includes(shiftId)) return false;
+    if (
+      staff.employmentType === 'PART_TIME' &&
+      staff.fixedShiftType &&
+      staff.fixedShiftType !== shiftId
+    ) return false;
+    const fixedDayShift = staff.fixedDayShifts?.[day.dayOfWeekIndex];
+    if (fixedDayShift && fixedDayShift !== shiftId) return false;
+    if (shiftId === 'NIGHT' && !staff.canNightShift) return false;
+    return true;
+  };
+  const canApplyCoverageSwap = (
+    sourceStaff: Staff,
+    sourceDay: (typeof days)[number],
+    sourceDayIndex: number,
+    sourceShiftId: ShiftTypeId,
+    targetStaff: Staff,
+    targetDay: (typeof days)[number],
+    targetDayIndex: number,
+    targetShiftId: ShiftTypeId
+  ): boolean => {
+    const sourceKey = `${sourceStaff.id}_${sourceDay.date}`;
+    const targetKey = `${targetStaff.id}_${targetDay.date}`;
+    const sourceAssignment = newAssignments[sourceKey];
+    const targetAssignment = newAssignments[targetKey];
+    const sourceShift = plan.shiftTypes[sourceShiftId];
+    const targetShift = plan.shiftTypes[targetShiftId];
+    if (
+      !sourceAssignment ||
+      sourceAssignment.shiftTypeId !== sourceShiftId ||
+      sourceAssignment.isLocked ||
+      sourceAssignment.isRequested ||
+      !targetAssignment ||
+      targetAssignment.shiftTypeId !== 'HOLIDAY' ||
+      targetAssignment.isLocked ||
+      targetAssignment.isRequested ||
+      !sourceShift?.isWork ||
+      sourceShift.isNight ||
+      !targetShift?.isWork ||
+      !canAssignCoverageShift(targetStaff, targetDay, targetShiftId)
+    ) return false;
+
+    if (
+      plan.rules.enableNgPairCheck &&
+      targetStaff.ngStaffIds?.some((ngStaffId) =>
+        newAssignments[`${ngStaffId}_${targetDay.date}`]?.shiftTypeId === targetShiftId
+      )
+    ) return false;
+
+    const overrides: Record<string, ShiftTypeId> = {
+      [sourceKey]: 'HOLIDAY',
+      [targetKey]: targetShiftId,
+    };
+    if (
+      !canKeepNightLink(sourceStaff, sourceDayIndex, 'HOLIDAY', overrides) ||
+      !canKeepNightLink(targetStaff, targetDayIndex, targetShiftId, overrides) ||
+      !hasRequiredRest(targetStaff.id, targetDayIndex, targetShiftId, overrides) ||
+      getConsecutiveWorkDaysAfterSwap(
+        targetStaff.id,
+        targetDayIndex,
+        overrides
+      ) > plan.rules.maxConsecutiveWorkDays
+    ) return false;
+
+    type WeeklySwapImpact = { workDays: number; workHours: number; holidays: number };
+    type StaffSwapImpact = { monthlyHours: number; weeks: Record<number, WeeklySwapImpact> };
+    const impacts: Record<string, StaffSwapImpact> = {};
+    const addImpact = (
+      staff: Staff,
+      day: (typeof days)[number],
+      workDays: number,
+      workHours: number,
+      holidays: number
+    ) => {
+      if (!impacts[staff.id]) impacts[staff.id] = { monthlyHours: 0, weeks: {} };
+      impacts[staff.id].monthlyHours += workHours;
+      if (!impacts[staff.id].weeks[day.weekIndex]) {
+        impacts[staff.id].weeks[day.weekIndex] = { workDays: 0, workHours: 0, holidays: 0 };
+      }
+      impacts[staff.id].weeks[day.weekIndex].workDays += workDays;
+      impacts[staff.id].weeks[day.weekIndex].workHours += workHours;
+      impacts[staff.id].weeks[day.weekIndex].holidays += holidays;
+    };
+    const sourceHours = getStaffShiftWorkHours(sourceStaff, sourceShift);
+    const targetHours = getStaffShiftWorkHours(targetStaff, targetShift);
+    addImpact(sourceStaff, sourceDay, -1, -sourceHours, 1);
+    addImpact(targetStaff, targetDay, 1, targetHours, -1);
+
+    for (const staffId of Object.keys(impacts)) {
+      const staff = plan.staffList.find((candidate) => candidate.id === staffId);
+      if (!staff) return false;
+      const impact = impacts[staffId];
+      const currentMonthlyHours = staffWorkHours[staffId] || 0;
+      const nextMonthlyHours = currentMonthlyHours + impact.monthlyHours;
+
+      if (staff.employmentType === 'FULL_TIME') {
+        const monthlyTarget =
+          plan.targetMonthlyHours && plan.targetMonthlyHours > 0
+            ? plan.targetMonthlyHours
+            : staff.monthlyMaxHours ?? 168;
+        const monthlyLimit = staff.monthlyMaxHours ?? monthlyTarget;
+        if (
+          nextMonthlyHours > monthlyLimit ||
+          Math.abs(nextMonthlyHours - monthlyTarget) >
+            Math.abs(currentMonthlyHours - monthlyTarget)
+        ) return false;
+      }
+
+      for (const [weekIndexText, weeklyImpact] of Object.entries(impact.weeks)) {
+        const weekIndex = Number(weekIndexText);
+        const currentWorkDays = staffWeeklyWorkDaysCount[staffId]?.[weekIndex] || 0;
+        const nextWorkDays = currentWorkDays + weeklyImpact.workDays;
+        const currentWeekHours = staffWeeklyWorkHours[staffId]?.[weekIndex] || 0;
+        const nextWeekHours = currentWeekHours + weeklyImpact.workHours;
+        if (nextWorkDays < 0 || nextWeekHours < 0) return false;
+
+        if (staff.employmentType === 'PART_TIME') {
+          const targetDays = partTimeWeeklyTargets[staffId]?.[weekIndex];
+          if (
+            nextWeekHours > PART_TIME_WEEKLY_HOURS_LIMIT ||
+            (targetDays !== undefined &&
+              Math.abs(nextWorkDays - targetDays) >
+                Math.abs(currentWorkDays - targetDays))
+          ) return false;
+        } else {
+          const weekTarget = fullTimeWeeklyHolidayTargets[weekIndex] || {
+            targetHolidays: 2,
+            maxWorkDays: 5,
+          };
+          const currentHolidays = getStaffWeekHolidayCount(staffId, weekIndex);
+          const nextHolidays = currentHolidays + weeklyImpact.holidays;
+          if (
+            nextWorkDays > weekTarget.maxWorkDays ||
+            Math.abs(nextHolidays - weekTarget.targetHolidays) >
+              Math.abs(currentHolidays - weekTarget.targetHolidays)
+          ) return false;
+        }
+      }
+    }
+    return true;
+  };
+
+  days.forEach((targetDay, targetDayIndex) => {
+    crossDateTargetShiftIds.forEach((targetShiftId) => {
+      const requiredCount = requiredByShift[targetShiftId] ?? 0;
+      while (
+        plan.staffList.filter(
+          (staff) =>
+            newAssignments[`${staff.id}_${targetDay.date}`]?.shiftTypeId === targetShiftId
+        ).length < requiredCount
+      ) {
+        const targetCandidates = orderByMonthlyShiftCount(
+          plan.staffList.filter((staff) => {
+            const assignment = newAssignments[`${staff.id}_${targetDay.date}`];
+            return (
+              assignment?.shiftTypeId === 'HOLIDAY' &&
+              !assignment.isLocked &&
+              !assignment.isRequested &&
+              canAssignCoverageShift(staff, targetDay, targetShiftId)
+            );
+          }),
+          targetShiftId
+        );
+        let swap:
+          | {
+              sourceStaff: Staff;
+              sourceDay: (typeof days)[number];
+              sourceShiftId: ShiftTypeId;
+              targetStaff: Staff;
+            }
+          | undefined;
+
+        for (const sourceDay of shuffle(days.filter((day) => day.date !== targetDay.date))) {
+          const sourceDayIndex = days.findIndex((day) => day.date === sourceDay.date);
+          const sourceCounts = getDayShiftCounts(sourceDay.date);
+          const surplusShiftIds = Object.keys(requiredByShift)
+            .filter((shiftId) => {
+              const shiftType = plan.shiftTypes[shiftId];
+              return (
+                (sourceCounts[shiftId] || 0) > (requiredByShift[shiftId] ?? 0) &&
+                shiftType?.isWork &&
+                !shiftType.isNight
+              );
+            })
+            .sort(
+              (first, second) =>
+                (sourceCounts[second] || 0) - (requiredByShift[second] || 0) -
+                ((sourceCounts[first] || 0) - (requiredByShift[first] || 0))
+            );
+
+          for (const sourceShiftId of surplusShiftIds) {
+            const sourceCandidates = orderByMonthlyShiftCount(
+              plan.staffList.filter((staff) => {
+                const assignment = newAssignments[`${staff.id}_${sourceDay.date}`];
+                return (
+                  assignment?.shiftTypeId === sourceShiftId &&
+                  !assignment.isLocked &&
+                  !assignment.isRequested &&
+                  !staff.fixedDayShifts?.[sourceDay.dayOfWeekIndex]
+                );
+              }),
+              sourceShiftId
+            );
+            for (const sourceStaff of sourceCandidates) {
+              for (const targetStaff of targetCandidates) {
+                if (
+                  canApplyCoverageSwap(
+                    sourceStaff,
+                    sourceDay,
+                    sourceDayIndex,
+                    sourceShiftId,
+                    targetStaff,
+                    targetDay,
+                    targetDayIndex,
+                    targetShiftId
+                  )
+                ) {
+                  swap = {
+                    sourceStaff,
+                    sourceDay,
+                    sourceShiftId,
+                    targetStaff,
+                  };
+                  break;
+                }
+              }
+              if (swap) break;
+            }
+            if (swap) break;
+          }
+          if (swap) break;
+        }
+
+        if (!swap) break;
+
+        const {
+          sourceStaff,
+          sourceDay,
+          sourceShiftId,
+          targetStaff,
+        } = swap;
+        const sourceKey = `${sourceStaff.id}_${sourceDay.date}`;
+        const targetKey = `${targetStaff.id}_${targetDay.date}`;
+        const sourceHours = getStaffShiftWorkHours(sourceStaff, plan.shiftTypes[sourceShiftId]);
+        const targetHours = getStaffShiftWorkHours(targetStaff, plan.shiftTypes[targetShiftId]);
+        newAssignments[sourceKey] = {
+          ...newAssignments[sourceKey],
+          shiftTypeId: 'HOLIDAY',
+        };
+        newAssignments[targetKey] = {
+          ...newAssignments[targetKey],
+          shiftTypeId: targetShiftId,
+        };
+        removeMonthlyShiftCount(sourceStaff.id, sourceShiftId);
+        addMonthlyShiftCount(sourceStaff.id, 'HOLIDAY');
+        removeMonthlyShiftCount(targetStaff.id, 'HOLIDAY');
+        addMonthlyShiftCount(targetStaff.id, targetShiftId);
+        if (
+          sourceShiftId === 'EARLY' ||
+          sourceShiftId === 'DAY' ||
+          sourceShiftId === 'LATE'
+        ) {
+          staffDayShiftCounts[sourceStaff.id][sourceShiftId] = Math.max(
+            0,
+            getDayShiftCount(sourceStaff.id, sourceShiftId) - 1
+          );
+        }
+        addDayShiftCount(targetStaff.id, targetShiftId);
+        staffWorkHours[sourceStaff.id] -= sourceHours;
+        staffWeeklyWorkHours[sourceStaff.id][sourceDay.weekIndex] =
+          (staffWeeklyWorkHours[sourceStaff.id][sourceDay.weekIndex] || 0) - sourceHours;
+        staffWeeklyWorkDaysCount[sourceStaff.id][sourceDay.weekIndex] = Math.max(
+          0,
+          (staffWeeklyWorkDaysCount[sourceStaff.id][sourceDay.weekIndex] || 0) - 1
+        );
+        staffHolidayCounts[sourceStaff.id] = (staffHolidayCounts[sourceStaff.id] || 0) + 1;
+        staffWorkHours[targetStaff.id] += targetHours;
+        staffWeeklyWorkHours[targetStaff.id][targetDay.weekIndex] =
+          (staffWeeklyWorkHours[targetStaff.id][targetDay.weekIndex] || 0) + targetHours;
+        staffWeeklyWorkDaysCount[targetStaff.id][targetDay.weekIndex] =
+          (staffWeeklyWorkDaysCount[targetStaff.id][targetDay.weekIndex] || 0) + 1;
+        staffHolidayCounts[targetStaff.id] = Math.max(
+          0,
+          (staffHolidayCounts[targetStaff.id] || 0) - 1
+        );
+        if (sourceDay.isWeekend) {
+          staffWeekendCounts[sourceStaff.id] = Math.max(
+            0,
+            (staffWeekendCounts[sourceStaff.id] || 0) - 1
+          );
+        }
+        if (targetDay.isWeekend) {
+          staffWeekendCounts[targetStaff.id] = (staffWeekendCounts[targetStaff.id] || 0) + 1;
+        }
+
+        if (targetShiftId === 'NIGHT' && nightShiftLinkRule !== 'none') {
+          if (targetDayIndex < days.length - 1) {
+            const nextKey = `${targetStaff.id}_${days[targetDayIndex + 1].date}`;
+            if (
+              newAssignments[nextKey]?.shiftTypeId === 'HOLIDAY' &&
+              !newAssignments[nextKey].isLocked &&
+              !newAssignments[nextKey].isRequested
+            ) {
+              newAssignments[nextKey] = {
+                ...newAssignments[nextKey],
+                shiftTypeId: 'NIGHT_NEXT',
+              };
+              staffHolidayCounts[targetStaff.id] = Math.max(
+                0,
+                (staffHolidayCounts[targetStaff.id] || 0) - 1
+              );
+            } else if (!newAssignments[nextKey]) {
+              newAssignments[nextKey] = {
+                staffId: targetStaff.id,
+                date: days[targetDayIndex + 1].date,
+                shiftTypeId: 'NIGHT_NEXT',
+                isLocked: false,
+                isRequested: false,
+              };
+            }
+          }
+          if (nightShiftLinkRule === 'night_next_holiday' && targetDayIndex < days.length - 2) {
+            const dayAfterNextKey = `${targetStaff.id}_${days[targetDayIndex + 2].date}`;
+            if (!newAssignments[dayAfterNextKey]) {
+              newAssignments[dayAfterNextKey] = {
+                staffId: targetStaff.id,
+                date: days[targetDayIndex + 2].date,
+                shiftTypeId: 'HOLIDAY',
+                isLocked: false,
+                isRequested: false,
+              };
+              staffHolidayCounts[targetStaff.id] = (staffHolidayCounts[targetStaff.id] || 0) + 1;
+            }
+          }
+        }
+
+      }
+    });
+  });
+
+  staffingShortageWarnings.forEach(({ date, shiftId, message }) => {
+    const requiredCount = requiredByShift[shiftId] ?? 0;
+    const actualCount = plan.staffList.filter(
+      (staff) => newAssignments[`${staff.id}_${date}`]?.shiftTypeId === shiftId
+    ).length;
+    if (actualCount >= requiredCount) {
+      const warningIndex = generationWarnings.indexOf(message);
+      if (warningIndex >= 0) generationWarnings.splice(warningIndex, 1);
+    }
   });
 
   if (generationWarnings.length > 0) {

@@ -6,7 +6,7 @@ export interface CalendarDay {
   isWeekend: boolean; // 土日フラグ
   isSunday: boolean;
   isSaturday: boolean;
-  weekIndex: number;  // 週番号（月曜起算）
+  weekIndex: number;  // 週番号（日曜起算）
 }
 
 export function getPreviousYearMonth(yearMonth: string): string {
@@ -31,8 +31,8 @@ export function getDaysInMonth(yearMonth: string): CalendarDay[] {
     const dayOfWeekIndex = dateObj.getDay();
     const formattedDate = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
     
-    // 月曜日に新しい週へ切り替え（1日目を除く）
-    if (d > 1 && dayOfWeekIndex === 1) {
+    // 日曜日に新しい週へ切り替え（1日目を除く）
+    if (d > 1 && dayOfWeekIndex === 0) {
       currentWeek++;
     }
 

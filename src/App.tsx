@@ -196,6 +196,55 @@ export function App() {
     }));
   };
 
+  const handleUpdateShiftTypes = (shiftTypes: MonthlySchedulePlan['shiftTypes']) => {
+    setPlan((prev) => {
+      const removedIds = new Set(
+        Object.keys(prev.shiftTypes).filter((shiftId) => !shiftTypes[shiftId])
+      );
+      if (removedIds.size === 0) {
+        return { ...prev, shiftTypes, updatedAt: new Date().toISOString() };
+      }
+
+      const assignments = Object.fromEntries(
+        Object.entries(prev.assignments).map(([key, assignment]) => [
+          key,
+          removedIds.has(assignment.shiftTypeId)
+            ? { ...assignment, shiftTypeId: 'HOLIDAY', isRequested: false }
+            : assignment,
+        ])
+      );
+      const staffList = prev.staffList.map((staff) => ({
+        ...staff,
+        preferredShiftTypes: staff.preferredShiftTypes?.filter((id) => !removedIds.has(id)),
+        availableShiftTypes: staff.availableShiftTypes?.filter((id) => !removedIds.has(id)),
+        fixedShiftType:
+          staff.fixedShiftType && removedIds.has(staff.fixedShiftType) ? undefined : staff.fixedShiftType,
+        fixedDayShifts: staff.fixedDayShifts
+          ? Object.fromEntries(
+              Object.entries(staff.fixedDayShifts).filter(([, id]) => !id || !removedIds.has(id))
+            )
+          : undefined,
+      }));
+      const requests = prev.requests.filter((request) => !removedIds.has(request.requestedShiftId));
+      const dailyRequirements = Object.fromEntries(
+        Object.entries(prev.dailyRequirements || {}).map(([date, requirement]) => {
+          const targetShiftCounts = { ...requirement.targetShiftCounts };
+          removedIds.forEach((id) => delete targetShiftCounts[id]);
+          return [date, { ...requirement, targetShiftCounts }];
+        })
+      );
+      return {
+        ...prev,
+        shiftTypes,
+        assignments,
+        staffList,
+        requests,
+        dailyRequirements,
+        updatedAt: new Date().toISOString(),
+      };
+    });
+  };
+
   // 行事・イベントの更新・追加・削除
   const handleUpdateEvent = (date: string, event: DayEvent | null) => {
     setPlan((prev) => {
@@ -241,6 +290,7 @@ export function App() {
           preferredShiftTypes: staff.preferredShiftTypes ? [...staff.preferredShiftTypes] : undefined,
           fixedDayShifts: staff.fixedDayShifts ? { ...staff.fixedDayShifts } : undefined,
           allowedWeeklyWorkDays: staff.allowedWeeklyWorkDays ? [...staff.allowedWeeklyWorkDays] : undefined,
+          availableShiftTypes: staff.availableShiftTypes ? [...staff.availableShiftTypes] : undefined,
           dailyWorkHours: staff.dailyWorkHours,
         })),
         shiftTypes: { ...currentPlan.shiftTypes },
@@ -344,6 +394,7 @@ export function App() {
         isOpen={isStaffModalOpen}
         onClose={() => setIsStaffModalOpen(false)}
         staffList={plan.staffList}
+        shiftTypes={plan.shiftTypes}
         onUpdateStaffList={handleUpdateStaffList}
       />
 
@@ -353,6 +404,8 @@ export function App() {
         onClose={() => setIsSettingsModalOpen(false)}
         rules={plan.rules}
         onUpdateRules={handleUpdateRules}
+        shiftTypes={plan.shiftTypes}
+        onUpdateShiftTypes={handleUpdateShiftTypes}
       />
     </div>
   );

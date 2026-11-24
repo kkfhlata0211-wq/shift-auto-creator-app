@@ -1,13 +1,15 @@
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, UserPlus, Trash2, Edit2, Check, Moon, Users, Calendar } from 'lucide-react';
-import { Staff, EmploymentType, ShiftTypeId } from '../types/shift';
+import { Staff, EmploymentType, ShiftType, ShiftTypeId } from '../types/shift';
 import { DEFAULT_PART_TIME_DAILY_WORK_HOURS } from '../engine/partTimeRules';
+import { getShiftTypeColorPresentation } from '../utils/shiftColors';
 
 interface StaffModalProps {
   isOpen: boolean;
   onClose: () => void;
   staffList: Staff[];
+  shiftTypes: Record<ShiftTypeId, ShiftType>;
   onUpdateStaffList: (newStaffList: Staff[]) => void;
 }
 
@@ -15,12 +17,19 @@ export const StaffModal: React.FC<StaffModalProps> = ({
   isOpen,
   onClose,
   staffList,
+  shiftTypes,
   onUpdateStaffList,
 }) => {
   const [editingStaffId, setEditingStaffId] = useState<string | null>(null);
   const [isAdding, setIsAdding] = useState(false);
   const sortedStaffList = [...staffList].sort(
     (first, second) => Number(first.employmentType === 'PART_TIME') - Number(second.employmentType === 'PART_TIME')
+  );
+  const assignableShiftTypes = Object.values(shiftTypes).filter(
+    (shiftType) => shiftType.isWork && !shiftType.isNight && shiftType.id !== 'PAID_LEAVE'
+  );
+  const availabilityShiftTypes = Object.values(shiftTypes).filter(
+    (shiftType) => shiftType.isWork && shiftType.id !== 'PAID_LEAVE'
   );
 
   // 編集/追加用フォーム状態
@@ -272,36 +281,26 @@ export const StaffModal: React.FC<StaffModalProps> = ({
                       className="w-4 h-4 text-purple-600 rounded"
                     />
                     <Moon className="w-4 h-4 text-purple-600" />
-                    <span>夜勤シフトに入ることができる</span>
+                    <span>{shiftTypes.NIGHT?.name || '夜勤'}シフトに入ることができる</span>
                   </label>
                 </div>
 
-                {/* パート専用設定: 早・日・遅固定 & 週勤務日数 & 曜日固定シフト */}
+                {/* パート専用設定: 勤務区分固定 & 週勤務日数 & 曜日固定シフト */}
                 {formData.employmentType === 'PART_TIME' && (
                   <>
                     {/* 早・日・遅固定設定 */}
                     <div className="col-span-3 pt-3 border-t border-blue-100">
                       <label className="block text-slate-700 font-semibold mb-1.5">
-                        勤務区分の固定（早・日・遅固定）
+                        勤務区分の固定
                       </label>
                       <div className="flex flex-wrap gap-2">
                         {[
-                          { id: undefined, label: '指定なし（全般）' },
-                          {
-                            id: 'EARLY',
-                            label: '早番固定（早）',
-                            color: 'bg-amber-100 text-amber-800 border-amber-300',
-                          },
-                          {
-                            id: 'DAY',
-                            label: '日勤固定（日）',
-                            color: 'bg-blue-100 text-blue-800 border-blue-300',
-                          },
-                          {
-                            id: 'LATE',
-                            label: '遅番固定（遅）',
-                            color: 'bg-orange-100 text-orange-800 border-orange-300',
-                          },
+                          { id: undefined, label: '指定なし（全般）', color: undefined },
+                          ...assignableShiftTypes.map((shiftType) => ({
+                            id: shiftType.id,
+                            label: `${shiftType.name}固定（${shiftType.shortName}）`,
+                            color: getShiftTypeColorPresentation(shiftType),
+                          })),
                         ].map((opt) => {
                           const isSelected =
                             formData.fixedShiftType === opt.id ||
@@ -319,10 +318,11 @@ export const StaffModal: React.FC<StaffModalProps> = ({
                               className={`px-3 py-1.5 rounded-lg border text-xs font-bold transition-all ${
                                 isSelected
                                   ? opt.color
-                                    ? `${opt.color} shadow-xs ring-2 ring-blue-500 font-black`
+                                    ? `${opt.color.className} shadow-xs ring-2 ring-blue-500 font-black`
                                     : 'bg-slate-700 text-white border-slate-700 shadow-xs ring-1 ring-slate-500'
                                   : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
                               }`}
+                              style={isSelected ? opt.color?.style : undefined}
                             >
                               {opt.label}
                             </button>
@@ -330,7 +330,7 @@ export const StaffModal: React.FC<StaffModalProps> = ({
                         })}
                       </div>
                       <span className="text-[10px] text-slate-400 mt-1 block">
-                        ※ 特定の勤務区分（日勤専従など）に固定したい場合に設定します。自動作成時も固定区分のみ割り当てられます。
+                        ※ 指定した区分のみ自動割り当てされます。
                       </span>
                     </div>
 
@@ -410,9 +410,9 @@ export const StaffModal: React.FC<StaffModalProps> = ({
                                 className="w-full text-xs py-1 px-1 border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 font-semibold bg-white"
                               >
                                 <option value="">指定なし</option>
-                                <option value="DAY">日勤</option>
-                                <option value="EARLY">早番</option>
-                                <option value="LATE">遅番</option>
+                                {assignableShiftTypes.map((shiftType) => (
+                                  <option key={shiftType.id} value={shiftType.id}>{shiftType.name}</option>
+                                ))}
                                 <option value="HOLIDAY">休 (固定)</option>
                               </select>
                             </div>
@@ -425,6 +425,36 @@ export const StaffModal: React.FC<StaffModalProps> = ({
                     </div>
                   </>
                 )}
+
+                <div className="col-span-3 pt-3 border-t border-blue-100">
+                  <label className="block text-slate-700 font-semibold mb-1.5">担当可能な勤務区分</label>
+                  <div className="flex flex-wrap gap-2">
+                    {availabilityShiftTypes.map((shiftType) => {
+                      const allowed = formData.availableShiftTypes;
+                      const checked = !allowed || allowed.includes(shiftType.id);
+                      return (
+                        <label key={shiftType.id} className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold ${checked ? 'border-blue-300 bg-blue-50 text-blue-800' : 'border-slate-200 bg-white text-slate-500'}`}>
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(event) => {
+                              const current = formData.availableShiftTypes ?? availabilityShiftTypes.map((item) => item.id);
+                              const next = event.target.checked
+                                ? [...current, shiftType.id]
+                                : current.filter((id) => id !== shiftType.id);
+                              setFormData({
+                                ...formData,
+                                availableShiftTypes: next.length === availabilityShiftTypes.length ? undefined : next,
+                              });
+                            }}
+                          />
+                          {shiftType.name}
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <span className="text-[10px] text-slate-400 mt-1 block">※ 未設定（すべて選択）の場合は全区分を担当可能とします。</span>
+                </div>
 
                 {/* NGペア設定 */}
                 <div className="col-span-3 pt-2">
@@ -470,7 +500,7 @@ export const StaffModal: React.FC<StaffModalProps> = ({
                 <tr>
                   <th className="px-4 py-3">氏名</th>
                   <th className="px-3 py-3">役職 / 雇用</th>
-                  <th className="px-3 py-3 text-center">夜勤</th>
+                  <th className="px-3 py-3 text-center">{shiftTypes.NIGHT?.name || '夜勤'}</th>
                   <th className="px-3 py-3 text-center">契約 / 上限時間</th>
                   <th className="px-3 py-3">NGペア</th>
                   <th className="px-4 py-3 text-right">操作</th>
@@ -481,6 +511,12 @@ export const StaffModal: React.FC<StaffModalProps> = ({
                   const ngNames = (staff.ngStaffIds || [])
                     .map((id) => staffList.find((s) => s.id === id)?.name)
                     .filter(Boolean);
+                  const fixedShift = staff.fixedShiftType
+                    ? shiftTypes[staff.fixedShiftType]
+                    : undefined;
+                  const fixedShiftColor = fixedShift
+                    ? getShiftTypeColorPresentation(fixedShift)
+                    : undefined;
 
                   return (
                     <tr key={staff.id} className="hover:bg-slate-50 transition-colors">
@@ -496,18 +532,12 @@ export const StaffModal: React.FC<StaffModalProps> = ({
                           {staff.fixedShiftType && (
                             <span
                               className={`text-[9px] px-1 py-0.2 rounded font-bold border ${
-                                staff.fixedShiftType === 'EARLY'
-                                  ? 'bg-amber-100 text-amber-800 border-amber-300'
-                                  : staff.fixedShiftType === 'DAY'
-                                  ? 'bg-blue-100 text-blue-800 border-blue-300'
-                                  : 'bg-orange-100 text-orange-800 border-orange-300'
+                                fixedShiftColor?.className ||
+                                'bg-slate-100 text-slate-700 border-slate-300'
                               }`}
+                              style={fixedShiftColor?.style}
                             >
-                              {staff.fixedShiftType === 'EARLY'
-                                ? '早番固定'
-                                : staff.fixedShiftType === 'DAY'
-                                ? '日勤固定'
-                                : '遅番固定'}
+                              {shiftTypes[staff.fixedShiftType]?.name || staff.fixedShiftType}固定
                             </span>
                           )}
                         </div>
@@ -515,7 +545,7 @@ export const StaffModal: React.FC<StaffModalProps> = ({
                       <td className="px-3 py-3 text-center">
                         {staff.canNightShift ? (
                           <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-purple-100 text-purple-700">
-                            夜勤可
+                            {shiftTypes.NIGHT?.name || '夜勤'}可
                           </span>
                         ) : (
                           <span className="text-slate-400 text-[11px]">-</span>

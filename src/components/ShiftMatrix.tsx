@@ -1,9 +1,18 @@
 import React, { useState } from 'react';
 import { Lock, Moon, Calendar, Plus, Trash2, Check, X } from 'lucide-react';
-import { MonthlySchedulePlan, ShiftTypeId, DayEvent } from '../types/shift';
+import {
+  getNightShiftLinkRule,
+  MonthlySchedulePlan,
+  NIGHT_SHIFT_LINK_RULES,
+  ShiftType,
+  ShiftTypeId,
+  DayEvent,
+} from '../types/shift';
 import { getDaysInMonth, CalendarDay } from '../utils/dateUtils';
 import { ValidationSummary } from '../engine/validator';
 import { PART_TIME_WEEKLY_HOURS_LIMIT } from '../engine/partTimeRules';
+import { getShiftTypeColorPresentation } from '../utils/shiftColors';
+import { getOrderedShiftTypes } from '../utils/shiftTypeOrder';
 
 interface ShiftMatrixProps {
   plan: MonthlySchedulePlan;
@@ -26,17 +35,111 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
   );
   const getDayColumnStyle = (day: CalendarDay): React.CSSProperties => ({
     width: 42,
-    ...(day.dayNumber % 7 === 0 ? { borderRight: '3px double #94a3b8' } : {}),
+    ...(day.isSaturday && day.dayNumber < days.length
+      ? { borderRight: '3px double #94a3b8' }
+      : {}),
   });
-  const summaryShiftIds: ShiftTypeId[] = [
-    'EARLY',
-    'DAY',
-    'LATE',
-    'NIGHT',
-    'NIGHT_NEXT',
-    'HOLIDAY',
-    'PAID_LEAVE',
-  ];
+  const orderedShiftTypes = getOrderedShiftTypes(plan.shiftTypes);
+  const summaryShiftIds: ShiftTypeId[] = orderedShiftTypes.map((shiftType) => shiftType.id);
+  const nightShiftRuleLabel =
+    NIGHT_SHIFT_LINK_RULES.find((rule) => rule.id === getNightShiftLinkRule(plan.rules))?.label ||
+    '夜→明→休を固定';
+  const coverageShiftTypes = orderedShiftTypes.filter(
+    (shiftType) => shiftType.isWork && shiftType.id !== 'PAID_LEAVE'
+  );
+  const renderCoverageRow = (shiftType: ShiftType) => {
+    const color = getShiftTypeColorPresentation(shiftType);
+    const isCustom = !['EARLY', 'DAY', 'LATE', 'NIGHT'].includes(shiftType.id);
+    const labelRequirement =
+      shiftType.id === 'EARLY'
+        ? plan.rules.defaultRequirements?.EARLY ?? 1
+        : shiftType.id === 'DAY'
+          ? plan.rules.defaultRequirements?.DAY ?? 2
+          : shiftType.id === 'LATE'
+            ? plan.rules.defaultRequirements?.LATE ?? 1
+            : shiftType.id === 'NIGHT'
+              ? plan.rules.defaultRequirements?.NIGHT ?? 1
+              : shiftType.requiredStaff ?? 0;
+    const summaryBackgroundClass =
+      shiftType.id === 'EARLY'
+        ? 'bg-lime-50/50'
+        : shiftType.id === 'DAY'
+          ? 'bg-blue-50/50'
+          : shiftType.id === 'LATE'
+            ? 'bg-orange-50/50'
+            : shiftType.id === 'NIGHT'
+              ? 'bg-purple-50/50'
+              : 'bg-slate-50';
+
+    return (
+      <tr key={`coverage_${shiftType.id}`} className={isCustom ? 'text-slate-700' : color.className}>
+        <td
+          style={{ left: 0, width: 150, ...color.style }}
+          className={`sticky left-0 z-20 px-3 py-1 font-bold border-b border-r border-slate-200 ${color.className}`}
+        >
+          {shiftType.name} 人数 (必要: {labelRequirement})
+        </td>
+        <td
+          style={{ left: 150, width: 110, ...color.style }}
+          className={`sticky left-[150px] z-20 border-b border-r border-slate-200 ${color.className}`}
+        />
+        <td
+          style={{ left: 260, width: 95, ...color.style }}
+          className={`sticky left-[260px] z-20 border-b border-r border-slate-200 ${color.className}`}
+        />
+        {days.map((day) => {
+          const coverage = validation.dailyCoverageSummary[day.date];
+          const actual =
+            shiftType.id === 'EARLY'
+              ? coverage?.actualEarly ?? 0
+              : shiftType.id === 'DAY'
+                ? coverage?.actualDay ?? 0
+                : shiftType.id === 'LATE'
+                  ? coverage?.actualLate ?? 0
+                  : shiftType.id === 'NIGHT'
+                    ? coverage?.actualNight ?? 0
+                    : coverage?.actualByShift[shiftType.id] ?? 0;
+          const required = isCustom
+            ? coverage?.requiredByShift[shiftType.id] ?? shiftType.requiredStaff ?? 0
+            : labelRequirement;
+          const isDeficit = actual < required;
+          const isExcess = actual > required;
+          const neutralStyle =
+            !isDeficit && !isExcess && color.style
+              ? {
+                  backgroundColor: color.style.backgroundColor,
+                  color: color.style.color,
+                }
+              : undefined;
+
+          return (
+            <td
+              key={`${shiftType.id}_${day.date}`}
+              style={{ ...getDayColumnStyle(day), ...neutralStyle }}
+              className={`text-center text-xs py-1 border-b border-r ${
+                isDeficit
+                  ? 'font-bold bg-rose-200 text-rose-800 border-rose-300'
+                  : isExcess
+                    ? 'font-bold bg-emerald-200 text-emerald-800 border-emerald-300'
+                    : isCustom
+                      ? `font-bold bg-slate-100 text-slate-700 border-slate-300 ${color.className}`
+                      : `font-bold ${color.className}`
+              } ${isDeficit || isExcess ? 'animate-pulse' : ''}`}
+            >
+              {actual}
+            </td>
+          );
+        })}
+        <td className={`border-b border-r border-slate-200 ${summaryBackgroundClass}`} />
+        {summaryShiftIds.map((shiftId) => (
+          <td
+            key={`${shiftType.id}_summary_${shiftId}`}
+            className={`border-b border-r border-slate-200 ${summaryBackgroundClass}`}
+          />
+        ))}
+      </tr>
+    );
+  };
 
   // ポップオーバーで選択中のセル
   const [activeCell, setActiveCell] = useState<{
@@ -115,15 +218,17 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
     }
     const def = plan.shiftTypes[shiftId];
     if (!def) return <span>{shiftId}</span>;
+    const color = getShiftTypeColorPresentation(def);
 
     return (
       <span
-        className={`inline-flex items-center justify-center w-7 h-7 rounded text-xs font-bold border transition-transform hover:scale-105 shadow-xs ${def.color} ${
+        className={`inline-flex items-center justify-center w-7 h-7 rounded text-xs font-bold border transition-transform hover:scale-105 shadow-xs ${color.className} ${
           isLocked ? 'ring-2 ring-amber-400 ring-offset-1 font-extrabold' : ''
         }`}
+        style={color.style}
         title={`${def.name} (${def.startTime}〜${def.endTime}, 実働${def.workHours}h)${
-          isLocked ? ' 【変更固定中】' : ''
-        }`}
+          shiftId === 'NIGHT' ? ` / 夜勤連動ルール: ${nightShiftRuleLabel}` : ''
+        }${isLocked ? ' 【変更固定中】' : ''}`}
       >
         {def.shortName}
       </span>
@@ -136,17 +241,26 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
       <div className="bg-white border-b border-slate-200 px-6 py-2 flex items-center justify-between text-xs text-slate-600">
         <div className="flex items-center gap-3">
           <span className="font-semibold text-slate-700">勤務区分 凡例:</span>
-          {Object.values(plan.shiftTypes).map((st) => (
-            <div key={st.id} className="flex items-center gap-1">
-              <span className={`inline-block px-1.5 py-0.5 rounded text-[11px] font-bold border ${st.color}`}>
-                {st.shortName}
-              </span>
-              <span>{st.name}</span>
-            </div>
-          ))}
+          {orderedShiftTypes.map((st) => {
+            const color = getShiftTypeColorPresentation(st);
+            return (
+              <div key={st.id} className="flex items-center gap-1">
+                <span
+                  className={`inline-block px-1.5 py-0.5 rounded text-[11px] font-bold border ${color.className}`}
+                  style={color.style}
+                >
+                  {st.shortName}
+                </span>
+                <span>{st.name}</span>
+              </div>
+            );
+          })}
         </div>
 
         <div className="flex items-center gap-4 text-slate-600">
+          <span className="rounded border border-purple-200 bg-purple-50 px-2 py-1 font-semibold text-purple-800">
+            夜勤連動: {nightShiftRuleLabel}
+          </span>
           <span className="flex items-center gap-1.5 font-medium">
             <span className="inline-flex items-center justify-center bg-amber-500 text-white rounded-full p-0.5 shadow-xs">
               <Lock className="w-2.5 h-2.5 stroke-[2.5]" />
@@ -328,7 +442,7 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
                           <div className="font-semibold text-slate-800 flex items-center gap-1.5">
                             {staff.name}
                             {staff.canNightShift && (
-                              <span title="夜勤可能スタッフ">
+                              <span title={`${plan.shiftTypes.NIGHT.name}可能スタッフ`}>
                                 <Moon className="w-3 h-3 text-purple-600" />
                               </span>
                             )}
@@ -339,7 +453,7 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
                               <span
                                 className={`text-[9px] px-1 py-0.2 rounded font-bold border ${
                                   staff.fixedShiftType === 'EARLY'
-                                    ? 'bg-amber-100 text-amber-800 border-amber-300'
+                                    ? 'bg-lime-100 text-lime-800 border-lime-300'
                                     : staff.fixedShiftType === 'DAY'
                                     ? 'bg-blue-100 text-blue-800 border-blue-300'
                                     : 'bg-orange-100 text-orange-800 border-orange-300'
@@ -514,181 +628,7 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
 
             {/* 必要人員・集計フッター（時間帯・シフト別） */}
             <tfoot className="border-t-2 border-slate-300 font-medium">
-              {/* 早番充足数 */}
-              <tr className="bg-amber-100 text-amber-800 border-amber-300">
-                <td
-                  style={{ left: 0, width: 150 }}
-                  className="sticky left-0 z-20 bg-amber-100 px-3 py-1 font-bold text-amber-800 border-b border-r border-amber-300"
-                >
-                  早番 人数 (必要: {plan.rules.defaultRequirements?.EARLY ?? 1})
-                </td>
-                <td
-                  style={{ left: 150, width: 110 }}
-                  className="sticky left-[150px] z-20 bg-amber-100 border-b border-r border-amber-300"
-                />
-                <td
-                  style={{ left: 260, width: 95 }}
-                  className="sticky left-[260px] z-20 bg-amber-100 border-b border-r border-amber-300"
-                />
-                {days.map((day) => {
-                  const cov = validation.dailyCoverageSummary[day.date];
-                  const actual = cov?.actualEarly || 0;
-                  const required = plan.rules.defaultRequirements?.EARLY ?? 1;
-                  const isDeficit = actual < required;
-                  const isExcess = actual > required;
-                  return (
-                    <td
-                      key={`early_${day.date}`}
-                      style={getDayColumnStyle(day)}
-                      className={`text-center text-xs py-1 border-b border-r ${
-                        isDeficit
-                          ? 'font-bold bg-rose-200 text-rose-800 border-rose-300'
-                          : isExcess
-                          ? 'font-bold bg-emerald-200 text-emerald-800 border-emerald-300'
-                          : 'font-bold bg-amber-100 text-amber-800 border-amber-300'
-                      } ${isDeficit || isExcess ? 'animate-pulse' : ''}`}
-                    >
-                      {actual}
-                    </td>
-                  );
-                })}
-                <td className="border-b border-r border-slate-200 bg-amber-50/50" />
-                {summaryShiftIds.map((shiftId) => (
-                  <td key={`early_summary_${shiftId}`} className="border-b border-r border-slate-200 bg-amber-50/50" />
-                ))}
-              </tr>
-
-              {/* 日勤充足数 */}
-              <tr className="bg-blue-100 text-blue-800 border-blue-300">
-                <td
-                  style={{ left: 0, width: 150 }}
-                  className="sticky left-0 z-20 bg-blue-100 px-3 py-1 font-bold text-blue-800 border-b border-r border-blue-300"
-                >
-                  日勤 人数 (必要: {plan.rules.defaultRequirements?.DAY ?? 2})
-                </td>
-                <td
-                  style={{ left: 150, width: 110 }}
-                  className="sticky left-[150px] z-20 bg-blue-100 border-b border-r border-blue-300"
-                />
-                <td
-                  style={{ left: 260, width: 95 }}
-                  className="sticky left-[260px] z-20 bg-blue-100 border-b border-r border-blue-300"
-                />
-                {days.map((day) => {
-                  const cov = validation.dailyCoverageSummary[day.date];
-                  const actual = cov?.actualDay || 0;
-                  const required = plan.rules.defaultRequirements?.DAY ?? 2;
-                  const isDeficit = actual < required;
-                  const isExcess = actual > required;
-                  return (
-                    <td
-                      key={`day_${day.date}`}
-                      style={getDayColumnStyle(day)}
-                      className={`text-center text-xs py-1 border-b border-r ${
-                        isDeficit
-                          ? 'font-bold bg-rose-200 text-rose-800 border-rose-300'
-                          : isExcess
-                          ? 'font-bold bg-emerald-200 text-emerald-800 border-emerald-300'
-                          : 'font-bold bg-blue-100 text-blue-800 border-blue-300'
-                      } ${isDeficit || isExcess ? 'animate-pulse' : ''}`}
-                    >
-                      {actual}
-                    </td>
-                  );
-                })}
-                <td className="border-b border-r border-slate-200 bg-blue-50/50" />
-                {summaryShiftIds.map((shiftId) => (
-                  <td key={`day_summary_${shiftId}`} className="border-b border-r border-slate-200 bg-blue-50/50" />
-                ))}
-              </tr>
-
-              {/* 遅番充足数 */}
-              <tr className="bg-orange-100 text-orange-800 border-orange-300">
-                <td
-                  style={{ left: 0, width: 150 }}
-                  className="sticky left-0 z-20 bg-orange-100 px-3 py-1 font-bold text-orange-800 border-b border-r border-orange-300"
-                >
-                  遅番 人数 (必要: {plan.rules.defaultRequirements?.LATE ?? 1})
-                </td>
-                <td
-                  style={{ left: 150, width: 110 }}
-                  className="sticky left-[150px] z-20 bg-orange-100 border-b border-r border-orange-300"
-                />
-                <td
-                  style={{ left: 260, width: 95 }}
-                  className="sticky left-[260px] z-20 bg-orange-100 border-b border-r border-orange-300"
-                />
-                {days.map((day) => {
-                  const cov = validation.dailyCoverageSummary[day.date];
-                  const actual = cov?.actualLate || 0;
-                  const required = plan.rules.defaultRequirements?.LATE ?? 1;
-                  const isDeficit = actual < required;
-                  const isExcess = actual > required;
-                  return (
-                    <td
-                      key={`late_${day.date}`}
-                      style={getDayColumnStyle(day)}
-                      className={`text-center text-xs py-1 border-b border-r ${
-                        isDeficit
-                          ? 'font-bold bg-rose-200 text-rose-800 border-rose-300'
-                          : isExcess
-                          ? 'font-bold bg-emerald-200 text-emerald-800 border-emerald-300'
-                          : 'font-bold bg-orange-100 text-orange-800 border-orange-300'
-                      } ${isDeficit || isExcess ? 'animate-pulse' : ''}`}
-                    >
-                      {actual}
-                    </td>
-                  );
-                })}
-                <td className="border-b border-r border-slate-200 bg-orange-50/50" />
-                {summaryShiftIds.map((shiftId) => (
-                  <td key={`late_summary_${shiftId}`} className="border-b border-r border-slate-200 bg-orange-50/50" />
-                ))}
-              </tr>
-
-              {/* 夜勤充足数 */}
-              <tr className="bg-purple-100 text-purple-800 border-purple-300">
-                <td
-                  style={{ left: 0, width: 150 }}
-                  className="sticky left-0 z-20 bg-purple-100 px-3 py-1 font-bold text-purple-800 border-b border-r border-purple-300"
-                >
-                  夜勤 人数 (必要: {plan.rules.defaultRequirements?.NIGHT ?? 1})
-                </td>
-                <td
-                  style={{ left: 150, width: 110 }}
-                  className="sticky left-[150px] z-20 bg-purple-100 border-b border-r border-purple-300"
-                />
-                <td
-                  style={{ left: 260, width: 95 }}
-                  className="sticky left-[260px] z-20 bg-purple-100 border-b border-r border-purple-300"
-                />
-                {days.map((day) => {
-                  const cov = validation.dailyCoverageSummary[day.date];
-                  const actual = cov?.actualNight || 0;
-                  const required = plan.rules.defaultRequirements?.NIGHT ?? 1;
-                  const isDeficit = actual < required;
-                  const isExcess = actual > required;
-                  return (
-                    <td
-                      key={`night_${day.date}`}
-                      style={getDayColumnStyle(day)}
-                      className={`text-center text-xs py-1 border-b border-r ${
-                        isDeficit
-                          ? 'font-bold bg-rose-200 text-rose-800 border-rose-300'
-                          : isExcess
-                          ? 'font-bold bg-emerald-200 text-emerald-800 border-emerald-300'
-                          : 'font-bold bg-purple-100 text-purple-800 border-purple-300'
-                      } ${isDeficit || isExcess ? 'animate-pulse' : ''}`}
-                    >
-                      {actual}
-                    </td>
-                  );
-                })}
-                <td className="border-b border-r border-slate-200 bg-purple-50/50" />
-                {summaryShiftIds.map((shiftId) => (
-                  <td key={`night_summary_${shiftId}`} className="border-b border-r border-slate-200 bg-purple-50/50" />
-                ))}
-              </tr>
+              {coverageShiftTypes.map(renderCoverageRow)}
 
               {/* 総合充足判定ハイライト */}
               <tr className="bg-slate-100">
@@ -780,18 +720,20 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
                   {summaryShiftIds.map((shiftId) => {
                     const st = plan.shiftTypes[shiftId];
                     const isSelected = selectedShiftId === st.id;
+                    const color = getShiftTypeColorPresentation(st);
                     return (
                       <button
                         key={st.id}
                         type="button"
                         onClick={() => setSelectedShiftId(st.id)}
                         className={`flex items-center justify-between p-2 rounded-xl border text-xs font-bold transition-all shadow-xs ${
-                          st.color
+                          color.className
                         } ${
                           isSelected
                             ? 'ring-2 ring-slate-800 ring-offset-1 shadow-md scale-[1.03] font-black'
                             : 'opacity-85 hover:opacity-100 hover:shadow hover:scale-[1.01]'
                         }`}
+                        style={color.style}
                       >
                         <div className="flex items-center gap-1.5">
                           <span className="w-6 h-6 flex items-center justify-center rounded-lg bg-white/90 text-slate-800 font-black text-xs shadow-xs">

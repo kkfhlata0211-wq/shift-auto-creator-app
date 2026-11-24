@@ -97,7 +97,7 @@ export function getPreviousMonthWorkStats(
 
   const [year, month, day] = firstDate.split('-').map(Number);
   const weekStart = new Date(year, month - 1, day);
-  weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7));
+  weekStart.setDate(weekStart.getDate() - weekStart.getDay());
   const weekStartDate = formatDate(weekStart);
   const previousMonthDays = getDaysInMonth(previousMonthPlan.yearMonth).filter(
     (previousDay) => previousDay.date >= weekStartDate && previousDay.date < firstDate

@@ -6,7 +6,7 @@
 export type EmploymentType = 'FULL_TIME' | 'PART_TIME';
 
 // 勤務区分の識別ID
-export type ShiftTypeId = 'DAY' | 'EARLY' | 'LATE' | 'NIGHT' | 'NIGHT_NEXT' | 'HOLIDAY' | 'PAID_LEAVE';
+export type ShiftTypeId = string;
 
 // 勤務区分（シフト定義）
 export interface ShiftType {
@@ -21,6 +21,8 @@ export interface ShiftType {
   textColor: string;       // テキスト色
   isWork: boolean;         // 労務計算上の出勤扱いかどうか
   isNight: boolean;        // 夜勤フラグ
+  requiredStaff?: number;  // 1日あたりの必要人数（カスタム勤務区分）
+  displayOrder?: number;   // 表示順（シフト定義JSONに保存）
 }
 
 // スタッフ情報
@@ -40,6 +42,7 @@ export interface Staff {
   fixedShiftType?: ShiftTypeId;     // パート: 勤務区分固定（早・日・遅）
   fixedDayShifts?: Partial<Record<number, ShiftTypeId>>; // パート: 曜日固定シフト（0:日 〜 6:土）
   allowedWeeklyWorkDays?: number[]; // パート: 週の勤務日数選択（複数可 例: [2, 3]日）
+  availableShiftTypes?: ShiftTypeId[]; // 未設定なら全区分を担当可能
 }
 
 // 日付別イベント・注記
@@ -77,10 +80,41 @@ export interface ShiftAssignment {
   isRequested: boolean;    // 希望による割当フラグ
 }
 
+export type NightShiftLinkRule = 'night_next_holiday' | 'night_next_only' | 'none';
+
+export const NIGHT_SHIFT_LINK_RULES: {
+  id: NightShiftLinkRule;
+  label: string;
+  description: string;
+}[] = [
+  {
+    id: 'night_next_holiday',
+    label: '夜→明→休を固定',
+    description: '夜勤の翌日は明番、翌々日は公休（有休希望を除く）にします。',
+  },
+  {
+    id: 'night_next_only',
+    label: '夜→明を固定',
+    description: '夜勤の翌日は明番にし、翌々日は通常どおり割り当てます。',
+  },
+  {
+    id: 'none',
+    label: '固定しない',
+    description: '夜勤後の明番・公休を自動では割り当てません。',
+  },
+];
+
+export const DEFAULT_NIGHT_SHIFT_LINK_RULE: NightShiftLinkRule = 'night_next_holiday';
+
+export function getNightShiftLinkRule(rules: Pick<ConstraintRules, 'nightShiftLinkRule'>): NightShiftLinkRule {
+  return rules.nightShiftLinkRule ?? DEFAULT_NIGHT_SHIFT_LINK_RULE;
+}
+
 // シフト制約・ルール設定
 export interface ConstraintRules {
   maxConsecutiveWorkDays: number;   // 連続勤務日数上限（通常4〜5日）
   nightShiftNextRule: 'HOLIDAY_OR_NEXT' | 'MANDATORY_NEXT'; // 夜勤翌日のルール
+  nightShiftLinkRule?: NightShiftLinkRule; // 夜勤後に明番・公休を自動割当するルール
   enableNgPairCheck: boolean;       // NGペアの制約有効フラグ
   balanceWeekendShifts: boolean;    // 土日祝の出勤回数平準化
   balanceNightShifts: boolean;      // 夜勤回数の平準化
