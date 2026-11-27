@@ -1,8 +1,23 @@
 import { MonthlySchedulePlan } from '../types/shift';
 import { getDaysInMonth } from './dateUtils';
+import { getStaffDisplayOrder } from './staffOrder';
 
 const STORAGE_KEY = 'SHIFT_AUTO_CREATOR_PLAN_V1';
 const PLANS_STORAGE_KEY = 'SHIFT_AUTO_CREATOR_PLANS_V1';
+
+type SaveFilePickerOptions = {
+  suggestedName: string;
+  types: Array<{
+    description: string;
+    accept: Record<string, string[]>;
+  }>;
+};
+
+type WindowWithSaveFilePicker = Window & {
+  showSaveFilePicker?: (options?: SaveFilePickerOptions) => Promise<FileSystemFileHandle>;
+};
+
+let jsonSaveFileHandle: FileSystemFileHandle | null = null;
 
 export function savePlanToStorage(plan: MonthlySchedulePlan): void {
   try {
@@ -47,8 +62,7 @@ export function loadPlansFromStorage(): Record<string, MonthlySchedulePlan> {
   }
 }
 
-export function exportPlanAsJson(plan: MonthlySchedulePlan): void {
-  const jsonStr = JSON.stringify(plan, null, 2);
+function downloadPlanAsJson(plan: MonthlySchedulePlan, jsonStr: string): void {
   const blob = new Blob([jsonStr], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -58,11 +72,50 @@ export function exportPlanAsJson(plan: MonthlySchedulePlan): void {
   URL.revokeObjectURL(url);
 }
 
+function isAbortError(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError';
+}
+
+export async function exportPlanAsJson(
+  plan: MonthlySchedulePlan,
+  chooseNewLocation = false
+): Promise<void> {
+  const jsonStr = JSON.stringify(plan, null, 2);
+  const picker = (window as WindowWithSaveFilePicker).showSaveFilePicker;
+
+  if (typeof picker !== 'function') {
+    downloadPlanAsJson(plan, jsonStr);
+    return;
+  }
+
+  try {
+    if (chooseNewLocation || !jsonSaveFileHandle) {
+      jsonSaveFileHandle = await picker.call(window, {
+        suggestedName: `shift_plan_${plan.yearMonth}.json`,
+        types: [
+          {
+            description: 'JSON files',
+            accept: { 'application/json': ['.json'] },
+          },
+        ],
+      });
+    }
+
+    const writable = await jsonSaveFileHandle.createWritable();
+    await writable.write(jsonStr);
+    await writable.close();
+  } catch (error) {
+    if (isAbortError(error)) return;
+    console.error('JSONファイルの保存に失敗しました:', error);
+    alert('JSONファイルを保存できませんでした。保存先へのアクセス権限をご確認ください。');
+  }
+}
+
 export function exportPlanAsCsv(plan: MonthlySchedulePlan): void {
   const days = getDaysInMonth(plan.yearMonth);
   const headers = ['スタッフ名', '職種', '雇用形態', ...days.map((d) => `${d.dayNumber}(${d.dayOfWeek})`), '合計時間(h)'];
   
-  const rows = plan.staffList.map((staff) => {
+  const rows = getStaffDisplayOrder(plan.staffList).map((staff) => {
     let totalHours = 0;
     const shiftCells = days.map((day) => {
       const key = `${staff.id}_${day.date}`;

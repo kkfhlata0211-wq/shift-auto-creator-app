@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { ArrowDown, ArrowUp, Check, Pencil, Plus, Trash2, X } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Check, GripVertical, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { ShiftType, ShiftTypeId } from '../types/shift';
 import {
   CUSTOM_SHIFT_COLOR_PRESETS,
@@ -42,7 +42,135 @@ const emptyShiftType = (): ShiftType => ({
 export const ShiftTypeManager: React.FC<ShiftTypeManagerProps> = ({ shiftTypes, onChange }) => {
   const [form, setForm] = useState<ShiftType | null>(null);
   const [editingId, setEditingId] = useState<ShiftTypeId | null>(null);
+  const [isReordering, setIsReordering] = useState(false);
+  const [draggedShiftTypeId, setDraggedShiftTypeId] = useState<ShiftTypeId | null>(null);
+  const [dropTargetId, setDropTargetId] = useState<ShiftTypeId | null>(null);
   const orderedShiftTypes = getOrderedShiftTypes(shiftTypes);
+  const pointerPressRef = useRef<{
+    id: ShiftTypeId;
+    pointerId: number;
+    startX: number;
+    startY: number;
+    active: boolean;
+  } | null>(null);
+  const dragTimerRef = useRef<number | null>(null);
+  const dropTargetRef = useRef<ShiftTypeId | null>(null);
+  const originalOrderRef = useRef<ShiftTypeId[] | null>(null);
+
+  useEffect(
+    () => () => {
+      if (dragTimerRef.current !== null) window.clearTimeout(dragTimerRef.current);
+    },
+    []
+  );
+
+  const clearPointerDrag = () => {
+    if (dragTimerRef.current !== null) {
+      window.clearTimeout(dragTimerRef.current);
+      dragTimerRef.current = null;
+    }
+    pointerPressRef.current = null;
+    dropTargetRef.current = null;
+    setDraggedShiftTypeId(null);
+    setDropTargetId(null);
+  };
+
+  const saveOrder = (reordered: ShiftType[]) => {
+    const nextShiftTypes: Record<ShiftTypeId, ShiftType> = {};
+    reordered.forEach((shiftType, index) => {
+      nextShiftTypes[shiftType.id] = { ...shiftType, displayOrder: index };
+    });
+    onChange(nextShiftTypes);
+  };
+
+  const moveToPosition = (id: ShiftTypeId, targetId: ShiftTypeId) => {
+    const fromIndex = orderedShiftTypes.findIndex((shiftType) => shiftType.id === id);
+    const toIndex = orderedShiftTypes.findIndex((shiftType) => shiftType.id === targetId);
+    if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return;
+    const reordered = [...orderedShiftTypes];
+    const [moved] = reordered.splice(fromIndex, 1);
+    reordered.splice(toIndex, 0, moved);
+    saveOrder(reordered);
+  };
+
+  const startReordering = () => {
+    originalOrderRef.current = orderedShiftTypes.map((shiftType) => shiftType.id);
+    setIsReordering(true);
+  };
+
+  const finishReordering = () => {
+    originalOrderRef.current = null;
+    clearPointerDrag();
+    setIsReordering(false);
+  };
+
+  const cancelReordering = () => {
+    const originalOrder = originalOrderRef.current;
+    if (originalOrder) {
+      const shiftTypesById = new Map(orderedShiftTypes.map((shiftType) => [shiftType.id, shiftType]));
+      const restored = originalOrder
+        .map((id) => shiftTypesById.get(id))
+        .filter((shiftType): shiftType is ShiftType => Boolean(shiftType));
+      saveOrder(restored);
+    }
+    finishReordering();
+  };
+
+  const handlePointerDown = (
+    event: React.PointerEvent<HTMLDivElement>,
+    shiftTypeId: ShiftTypeId
+  ) => {
+    if (!isReordering || event.button !== 0) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    pointerPressRef.current = {
+      id: shiftTypeId,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      active: false,
+    };
+    dragTimerRef.current = window.setTimeout(() => {
+      const press = pointerPressRef.current;
+      if (press?.pointerId !== event.pointerId) return;
+      press.active = true;
+      dropTargetRef.current = shiftTypeId;
+      setDraggedShiftTypeId(shiftTypeId);
+      setDropTargetId(shiftTypeId);
+    }, 280);
+  };
+
+  const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const press = pointerPressRef.current;
+    if (!press || press.pointerId !== event.pointerId) return;
+    if (!press.active) {
+      if (Math.hypot(event.clientX - press.startX, event.clientY - press.startY) > 10) {
+        clearPointerDrag();
+      }
+      return;
+    }
+    const target = document
+      .elementFromPoint(event.clientX, event.clientY)
+      ?.closest<HTMLElement>('[data-shift-order-id]');
+    const targetId = target?.dataset.shiftOrderId;
+    if (targetId) {
+      dropTargetRef.current = targetId;
+      setDropTargetId(targetId);
+    }
+  };
+
+  const handlePointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    const press = pointerPressRef.current;
+    if (press?.pointerId === event.pointerId && press.active) {
+      const target = document
+        .elementFromPoint(event.clientX, event.clientY)
+        ?.closest<HTMLElement>('[data-shift-order-id]');
+      const targetId = target?.dataset.shiftOrderId || dropTargetRef.current;
+      if (targetId) moveToPosition(press.id, targetId);
+    }
+    clearPointerDrag();
+  };
+
+  const handlePointerCancel = () => clearPointerDrag();
 
   const startAdd = () => {
     setEditingId(null);
@@ -75,24 +203,28 @@ export const ShiftTypeManager: React.FC<ShiftTypeManagerProps> = ({ shiftTypes, 
     }
 
     const id = editingId || `CUSTOM_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const existingShiftType = editingId ? shiftTypes[editingId] : undefined;
+    const isBuiltIn = Boolean(editingId && BUILT_IN_SHIFT_IDS.has(editingId));
+    const isWork = isBuiltIn ? existingShiftType?.isWork ?? form.isWork : form.isWork;
     const saved: ShiftType = {
       ...form,
       id,
       name: form.name.trim(),
       shortName: form.shortName.trim(),
       textColor: getShiftColorPresentation(form.color, form.textColor).style?.color || form.textColor,
-      workHours: form.isWork ? form.workHours : 0,
-      fteWeight: form.isWork ? form.workHours / 8 : 0,
-      isNight: false,
-      requiredStaff: form.isWork ? Math.max(0, Math.floor(form.requiredStaff ?? 0)) : 0,
+      isWork,
+      workHours: isWork ? form.workHours : 0,
+      fteWeight: isWork ? form.workHours / 8 : 0,
+      isNight: isBuiltIn ? existingShiftType?.isNight ?? false : false,
+      requiredStaff: isBuiltIn
+        ? existingShiftType?.requiredStaff
+        : isWork
+          ? Math.max(0, Math.floor(form.requiredStaff ?? 0))
+          : 0,
     };
     const nextShiftTypes = { ...shiftTypes, [id]: saved };
     const nextOrder = getOrderedShiftTypes(nextShiftTypes);
-    const orderedMap: Record<ShiftTypeId, ShiftType> = {};
-    nextOrder.forEach((shiftType, index) => {
-      orderedMap[shiftType.id] = { ...shiftType, displayOrder: index };
-    });
-    onChange(orderedMap);
+    saveOrder(nextOrder);
     setForm(null);
   };
 
@@ -108,19 +240,7 @@ export const ShiftTypeManager: React.FC<ShiftTypeManagerProps> = ({ shiftTypes, 
     (shiftType) =>
       !BUILT_IN_SHIFT_IDS.has(shiftType.id) || VISIBLE_BUILT_IN_SHIFT_IDS.has(shiftType.id)
   );
-  const moveShiftType = (id: ShiftTypeId, direction: -1 | 1) => {
-    const currentIndex = orderedShiftTypes.findIndex((shiftType) => shiftType.id === id);
-    const nextIndex = currentIndex + direction;
-    if (currentIndex < 0 || nextIndex < 0 || nextIndex >= orderedShiftTypes.length) return;
-
-    const reordered = [...orderedShiftTypes];
-    [reordered[currentIndex], reordered[nextIndex]] = [reordered[nextIndex], reordered[currentIndex]];
-    const nextShiftTypes: Record<ShiftTypeId, ShiftType> = {};
-    reordered.forEach((shiftType, index) => {
-      nextShiftTypes[shiftType.id] = { ...shiftType, displayOrder: index };
-    });
-    onChange(nextShiftTypes);
-  };
+  const isEditingBuiltIn = Boolean(editingId && BUILT_IN_SHIFT_IDS.has(editingId));
   const updateDisplayField = (id: ShiftTypeId, field: 'name' | 'shortName', value: string) => {
     onChange({
       ...shiftTypes,
@@ -135,64 +255,114 @@ export const ShiftTypeManager: React.FC<ShiftTypeManagerProps> = ({ shiftTypes, 
         <p className="text-[11px] text-slate-500 mt-1">内部IDや勤務ルールは変えず、表示名・略称を編集できます。</p>
         </div>
         {!form && (
-          <button type="button" onClick={startAdd} className="flex shrink-0 items-center gap-1 rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700">
-            <Plus className="h-4 w-4" /> 区分を追加
-          </button>
+          <div className="flex shrink-0 flex-wrap justify-end gap-2">
+            {isReordering ? (
+              <>
+                <button
+                  type="button"
+                  onClick={cancelReordering}
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                >
+                  キャンセル
+                </button>
+                <button
+                  type="button"
+                  onClick={finishReordering}
+                  className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700"
+                >
+                  完了
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={startReordering}
+                  className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-100"
+                >
+                  シフトの順番を変更
+                </button>
+                <button
+                  type="button"
+                  onClick={startAdd}
+                  className="flex items-center gap-1 rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700"
+                >
+                  <Plus className="h-4 w-4" /> 区分を追加
+                </button>
+              </>
+            )}
+          </div>
         )}
       </div>
 
-      <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
+      {isReordering ? (
         <div>
-          <h4 className="text-xs font-bold text-slate-700">シフト区分の表示順</h4>
-          <p className="mt-1 text-[10px] text-slate-500">
-            ↑↓で変更できます。シフト表の集計行・集計列にも反映されます。
+          <p className="mb-2 text-[11px] text-slate-500">
+            カードを約0.3秒長押ししてからドラッグしてください。
           </p>
-        </div>
-        <ol className="max-h-48 space-y-1 overflow-y-auto">
-          {orderedShiftTypes.map((shiftType, index) => {
+          <div
+            className="grid grid-cols-2 items-start gap-3 sm:grid-cols-4"
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerCancel={handlePointerCancel}
+          >
+            {orderedShiftTypes.map((shiftType) => {
+              const isDragging = draggedShiftTypeId === shiftType.id;
+              const isDropTarget = dropTargetId === shiftType.id && !isDragging;
             const color = getShiftTypeColorPresentation(shiftType);
             return (
-              <li
+              <div
                 key={`order_${shiftType.id}`}
-                className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2 py-1.5"
+                data-shift-order-id={shiftType.id}
+                role="button"
+                tabIndex={0}
+                aria-label={`${shiftType.name}の並び替えカード`}
+                onPointerDown={(event) => handlePointerDown(event, shiftType.id)}
+                onKeyDown={(event) => {
+                  if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+                    event.preventDefault();
+                    moveToPosition(
+                      shiftType.id,
+                      orderedShiftTypes[
+                        Math.max(
+                          0,
+                          Math.min(
+                            orderedShiftTypes.length - 1,
+                            orderedShiftTypes.findIndex((item) => item.id === shiftType.id) +
+                              (event.key === 'ArrowUp' ? -1 : 1)
+                          )
+                        )
+                      ].id
+                    );
+                  }
+                }}
+                onContextMenu={(event) => event.preventDefault()}
+                className={`flex min-h-16 touch-none select-none items-center gap-2 rounded-xl border p-3 text-left transition-all ${
+                  color.className
+                } ${
+                  isDragging
+                    ? 'z-10 -translate-y-1 scale-[1.03] cursor-grabbing opacity-70 shadow-xl ring-2 ring-blue-500'
+                    : isDropTarget
+                      ? 'border-blue-500 ring-2 ring-blue-300'
+                      : 'cursor-grab hover:shadow-md'
+                }`}
+                style={color.style}
               >
-                <span
-                  className={`inline-flex h-6 min-w-6 items-center justify-center rounded px-1 text-[10px] font-bold ${color.className}`}
-                  style={color.style}
-                >
+                <GripVertical className="h-4 w-4 shrink-0 opacity-60" />
+                <span className="inline-flex h-7 min-w-7 items-center justify-center rounded bg-white/80 px-1 text-xs font-black text-slate-800">
                   {shiftType.shortName}
                 </span>
-                <span className="min-w-0 flex-1 truncate text-xs font-medium text-slate-700">
+                <span className="min-w-0 flex-1 truncate text-xs font-bold">
                   {shiftType.name}
                 </span>
-                <button
-                  type="button"
-                  onClick={() => moveShiftType(shiftType.id, -1)}
-                  disabled={index === 0}
-                  aria-label={`${shiftType.name}を上へ移動`}
-                  title="上へ移動"
-                  className="rounded p-1 text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-30"
-                >
-                  <ArrowUp className="h-4 w-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => moveShiftType(shiftType.id, 1)}
-                  disabled={index === orderedShiftTypes.length - 1}
-                  aria-label={`${shiftType.name}を下へ移動`}
-                  title="下へ移動"
-                  className="rounded p-1 text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-30"
-                >
-                  <ArrowDown className="h-4 w-4" />
-                </button>
-              </li>
+              </div>
             );
           })}
-        </ol>
-      </div>
-
-      <div className="grid grid-cols-2 items-start gap-3 sm:grid-cols-4">
-        {visibleShiftTypes.map((shiftType) => {
+          </div>
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 items-start gap-3 sm:grid-cols-4">
+          {visibleShiftTypes.map((shiftType) => {
           const isCustom = !BUILT_IN_SHIFT_IDS.has(shiftType.id);
           const color = getShiftTypeColorPresentation(shiftType);
           return (
@@ -211,11 +381,11 @@ export const ShiftTypeManager: React.FC<ShiftTypeManagerProps> = ({ shiftTypes, 
                     {shiftType.shortName}
                   </span>
                   <span className="min-w-0 flex-1 truncate text-xs font-bold">{shiftType.name}</span>
+                  <button type="button" onClick={() => startEdit(shiftType)} aria-label={`${shiftType.name}の勤務設定を編集`} className="rounded p-1.5 text-slate-600 hover:bg-white/70">
+                    <Pencil className="h-4 w-4" />
+                  </button>
                   {isCustom && (
                     <>
-                      <button type="button" onClick={() => startEdit(shiftType)} aria-label={`${shiftType.name}の勤務設定を編集`} className="rounded p-1.5 text-slate-600 hover:bg-white/70">
-                        <Pencil className="h-4 w-4" />
-                      </button>
                       <button type="button" onClick={() => remove(shiftType)} aria-label={`${shiftType.name}を削除`} className="rounded p-1.5 text-rose-700 hover:bg-white/70">
                         <Trash2 className="h-4 w-4" />
                       </button>
@@ -248,8 +418,9 @@ export const ShiftTypeManager: React.FC<ShiftTypeManagerProps> = ({ shiftTypes, 
               )}
             </div>
           );
-        })}
-      </div>
+          })}
+        </div>
+      )}
 
       {form && (
         <div className="space-y-3 rounded-xl border border-blue-200 bg-blue-50/50 p-4">
@@ -266,10 +437,12 @@ export const ShiftTypeManager: React.FC<ShiftTypeManagerProps> = ({ shiftTypes, 
               <span className="block font-semibold">略称 *</span>
               <input value={form.shortName} maxLength={3} onChange={(event) => setForm({ ...form, shortName: event.target.value })} placeholder="例: 中" className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2" />
             </label>
-            <label className="flex items-center gap-2 font-semibold">
-              <input type="checkbox" checked={form.isWork} onChange={(event) => setForm({ ...form, isWork: event.target.checked })} />
-              出勤扱いにする
-            </label>
+            {!isEditingBuiltIn && (
+              <label className="flex items-center gap-2 font-semibold">
+                <input type="checkbox" checked={form.isWork} onChange={(event) => setForm({ ...form, isWork: event.target.checked })} />
+                出勤扱いにする
+              </label>
+            )}
             <label className="flex items-center gap-2 font-semibold">
               <span>表示色</span>
               <input type="color" value={form.color.startsWith('#') ? form.color : '#3b82f6'} onChange={(event) => setForm({ ...form, color: event.target.value })} className="h-8 w-12 cursor-pointer rounded border border-slate-300 bg-white p-1" />

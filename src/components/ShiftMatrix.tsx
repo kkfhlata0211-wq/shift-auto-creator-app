@@ -13,6 +13,7 @@ import { ValidationSummary } from '../engine/validator';
 import { PART_TIME_WEEKLY_HOURS_LIMIT } from '../engine/partTimeRules';
 import { getShiftTypeColorPresentation } from '../utils/shiftColors';
 import { getOrderedShiftTypes } from '../utils/shiftTypeOrder';
+import { getStaffDisplayOrder } from '../utils/staffOrder';
 
 interface ShiftMatrixProps {
   plan: MonthlySchedulePlan;
@@ -22,6 +23,8 @@ interface ShiftMatrixProps {
   onUpdateEvent?: (date: string, event: DayEvent | null) => void;
 }
 
+const STAFF_NAME_COLUMN_WIDTH = 180;
+
 export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
   plan,
   validation,
@@ -30,9 +33,7 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
   onUpdateEvent,
 }) => {
   const days: CalendarDay[] = getDaysInMonth(plan.yearMonth);
-  const sortedStaffList = [...plan.staffList].sort(
-    (first, second) => Number(first.employmentType === 'PART_TIME') - Number(second.employmentType === 'PART_TIME')
-  );
+  const sortedStaffList = getStaffDisplayOrder(plan.staffList);
   const getDayColumnStyle = (day: CalendarDay): React.CSSProperties => ({
     width: 42,
     ...(day.isSaturday && day.dayNumber < days.length
@@ -74,18 +75,20 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
     return (
       <tr key={`coverage_${shiftType.id}`} className={isCustom ? 'text-slate-700' : color.className}>
         <td
-          style={{ left: 0, width: 150, ...color.style }}
-          className={`sticky left-0 z-20 px-3 py-1 font-bold border-b border-r border-slate-200 ${color.className}`}
+          style={{
+            left: 0,
+            width: STAFF_NAME_COLUMN_WIDTH,
+            minWidth: STAFF_NAME_COLUMN_WIDTH,
+            maxWidth: STAFF_NAME_COLUMN_WIDTH,
+            ...color.style,
+          }}
+          className={`sticky left-0 z-20 px-3 py-1 font-bold border-b border-r border-slate-200 shadow-[2px_0_4px_-2px_rgba(15,23,42,0.35)] ${color.className}`}
         >
           {shiftType.name} 人数 (必要: {labelRequirement})
         </td>
         <td
-          style={{ left: 150, width: 110, ...color.style }}
-          className={`sticky left-[150px] z-20 border-b border-r border-slate-200 ${color.className}`}
-        />
-        <td
-          style={{ left: 260, width: 95, ...color.style }}
-          className={`sticky left-[260px] z-20 border-b border-r border-slate-200 ${color.className}`}
+          style={{ left: STAFF_NAME_COLUMN_WIDTH, width: 95, ...color.style }}
+          className={`sticky left-[180px] z-20 border-b border-r border-slate-200 ${color.className}`}
         />
         {days.map((day) => {
           const coverage = validation.dailyCoverageSummary[day.date];
@@ -277,13 +280,18 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
       </div>
 
       {/* スクロール可能なマトリクスグリッド */}
-      <div className="flex-1 overflow-auto p-4">
-        <div className="inline-block min-w-full align-middle bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+      <div className="min-h-0 flex-1 overflow-auto p-4">
+        <div className="inline-block min-w-full align-middle bg-white rounded-xl shadow-sm border border-slate-200">
           <table className="border-separate border-spacing-0 text-left text-xs table-fixed [&_th]:border-gray-300 [&_td]:border-gray-300">
             {/* カラム幅をブラウザの拡大縮小時もピクセル単位で厳格固定 */}
             <colgroup>
-              <col style={{ width: 150, minWidth: 150, maxWidth: 150 }} />
-              <col style={{ width: 110, minWidth: 110, maxWidth: 110 }} />
+              <col
+                style={{
+                  width: STAFF_NAME_COLUMN_WIDTH,
+                  minWidth: STAFF_NAME_COLUMN_WIDTH,
+                  maxWidth: STAFF_NAME_COLUMN_WIDTH,
+                }}
+              />
               <col style={{ width: 95, minWidth: 95, maxWidth: 95 }} />
               {days.map((day) => (
                 <col key={day.date} style={{ width: 42, minWidth: 42, maxWidth: 42 }} />
@@ -298,20 +306,19 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
               {/* 1段目: 日付・曜日行 */}
               <tr className="bg-slate-100">
                 <th
-                  style={{ left: 0, width: 150 }}
-                  className="sticky left-0 z-30 bg-slate-100 px-3 py-2 font-bold text-slate-700 border-b border-r border-slate-200"
+                  style={{
+                    left: 0,
+                    width: STAFF_NAME_COLUMN_WIDTH,
+                    minWidth: STAFF_NAME_COLUMN_WIDTH,
+                    maxWidth: STAFF_NAME_COLUMN_WIDTH,
+                  }}
+                  className="sticky top-0 left-0 z-50 bg-slate-100 px-3 py-2 font-bold text-slate-700 border-b border-r border-slate-200 shadow-[2px_0_4px_-2px_rgba(15,23,42,0.35)]"
                 >
-                  スタッフ氏名
+                  スタッフ氏名・職種
                 </th>
                 <th
-                  style={{ left: 150, width: 110 }}
-                  className="sticky left-[150px] z-30 bg-slate-100 px-2 py-2 font-bold text-slate-700 border-b border-r border-slate-200 text-center"
-                >
-                  職種
-                </th>
-                <th
-                  style={{ left: 260, width: 95 }}
-                  className="sticky left-[260px] z-30 bg-slate-100 px-2 py-2 font-bold text-slate-700 border-b border-r border-slate-200 text-center"
+                  style={{ left: STAFF_NAME_COLUMN_WIDTH, width: 95 }}
+                  className="sticky top-0 left-[180px] z-40 bg-slate-100 px-2 py-2 font-bold text-slate-700 border-b border-r border-slate-200 text-center"
                 >
                   1日労働時間
                 </th>
@@ -328,7 +335,7 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
                     <th
                       key={day.date}
                       style={getDayColumnStyle(day)}
-                      className={`px-1 py-1.5 text-center border-b border-r border-slate-200 ${dayColor}`}
+                      className={`sticky top-0 z-30 px-1 py-1.5 text-center border-b border-r border-slate-200 ${dayColor}`}
                     >
                       <div className="font-bold text-sm leading-none">{day.dayNumber}</div>
                       <div className="text-[10px] font-semibold mt-0.5">({day.dayOfWeek})</div>
@@ -336,14 +343,14 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
                   );
                 })}
                 <th
-                  className="px-2 py-2 font-bold text-slate-700 border-b border-r border-slate-200 text-center bg-slate-100"
+                  className="sticky top-0 z-30 px-2 py-2 font-bold text-slate-700 border-b border-r border-slate-200 text-center bg-slate-100"
                 >
                   月労働時間
                 </th>
                 {summaryShiftIds.map((shiftId) => (
                   <th
                     key={`summary_${shiftId}`}
-                    className="px-1 py-1.5 text-center font-bold border-b border-r border-slate-300 bg-slate-200 text-slate-700"
+                    className="sticky top-0 z-30 px-1 py-1.5 text-center font-bold border-b border-r border-slate-300 bg-slate-200 text-slate-700"
                     title={`${plan.shiftTypes[shiftId].name}の月間合計`}
                   >
                     {plan.shiftTypes[shiftId].shortName}
@@ -354,8 +361,13 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
               {/* 2段目: 行事・イベント行（日付の下に配置＆編集可能） */}
               <tr className="bg-slate-50">
                 <th
-                  style={{ left: 0, width: 150 }}
-                  className="sticky left-0 z-30 bg-slate-50 px-3 py-1 font-bold text-slate-600 border-b border-r border-slate-200"
+                  style={{
+                    left: 0,
+                    width: STAFF_NAME_COLUMN_WIDTH,
+                    minWidth: STAFF_NAME_COLUMN_WIDTH,
+                    maxWidth: STAFF_NAME_COLUMN_WIDTH,
+                  }}
+                  className="sticky left-0 z-20 bg-slate-50 px-3 py-1 font-bold text-slate-600 border-b border-r border-slate-200 shadow-[2px_0_4px_-2px_rgba(15,23,42,0.35)]"
                 >
                   <div className="flex items-center justify-center gap-1.5">
                     <Calendar className="w-3.5 h-3.5 shrink-0 text-blue-600" />
@@ -368,12 +380,8 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
                   </div>
                 </th>
                 <th
-                  style={{ left: 150, width: 110 }}
-                  className="sticky left-[150px] z-30 bg-slate-50 border-b border-r border-slate-200"
-                />
-                <th
-                  style={{ left: 260, width: 95 }}
-                  className="sticky left-[260px] z-30 bg-slate-50 border-b border-r border-slate-200 text-center text-[10px] text-slate-400 font-normal"
+                  style={{ left: STAFF_NAME_COLUMN_WIDTH, width: 95 }}
+                  className="sticky left-[180px] z-20 bg-slate-50 border-b border-r border-slate-200 text-center text-[10px] text-slate-400 font-normal"
                 />
                 {days.map((day) => {
                   const event = plan.events[day.date];
@@ -432,8 +440,13 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
                   <tr key={staff.id} className="hover:bg-slate-50 transition-colors">
                     {/* スタッフ名 */}
                     <td
-                      style={{ left: 0, width: 150 }}
-                      className={`sticky left-0 z-20 bg-white hover:bg-slate-50 px-3 py-2 border-b border-r border-slate-200 ${
+                      style={{
+                        left: 0,
+                        width: STAFF_NAME_COLUMN_WIDTH,
+                        minWidth: STAFF_NAME_COLUMN_WIDTH,
+                        maxWidth: STAFF_NAME_COLUMN_WIDTH,
+                      }}
+                      className={`sticky left-0 z-20 bg-white hover:bg-slate-50 px-3 py-2 border-b border-r border-slate-200 shadow-[2px_0_4px_-2px_rgba(15,23,42,0.35)] ${
                         isFirstPartTime ? 'border-t-[3px] border-double border-slate-400' : ''
                       }`}
                     >
@@ -447,8 +460,12 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
                               </span>
                             )}
                           </div>
-                          <div className="flex items-center gap-1 text-[10px] text-slate-400">
-                            <span>{staff.employmentType === 'FULL_TIME' ? '正社員' : 'パート'}</span>
+                          <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[10px] text-slate-400">
+                            <span>
+                              {[staff.employmentType === 'FULL_TIME' ? '正社員' : 'パート', staff.role?.trim()]
+                                .filter(Boolean)
+                                .join('　')}
+                            </span>
                             {staff.fixedShiftType && (
                               <span
                                 className={`text-[9px] px-1 py-0.2 rounded font-bold border ${
@@ -471,20 +488,10 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
                       </div>
                     </td>
 
-                    {/* 役職 */}
-                    <td
-                      style={{ left: 150, width: 110 }}
-                      className={`sticky left-[150px] z-20 bg-white hover:bg-slate-50 px-2 py-2 border-b border-r border-slate-200 text-center ${
-                        isFirstPartTime ? 'border-t-[3px] border-double border-slate-400' : ''
-                      }`}
-                    >
-                      <div className="text-[11px] font-medium text-slate-700">{staff.role}</div>
-                    </td>
-
                     {/* パートの1日労働時間 */}
                     <td
-                      style={{ left: 260, width: 95 }}
-                      className={`sticky left-[260px] z-20 bg-white hover:bg-slate-50 px-2 py-2 border-b border-r border-slate-200 text-center ${
+                      style={{ left: STAFF_NAME_COLUMN_WIDTH, width: 95 }}
+                      className={`sticky left-[180px] z-20 bg-white hover:bg-slate-50 px-2 py-2 border-b border-r border-slate-200 text-center ${
                         hoursInfo.isWeeklyOver ? 'bg-rose-50/70' : ''
                       } ${isFirstPartTime ? 'border-t-[3px] border-double border-slate-400' : ''}`}
                     >
@@ -633,18 +640,19 @@ export const ShiftMatrix: React.FC<ShiftMatrixProps> = ({
               {/* 総合充足判定ハイライト */}
               <tr className="bg-slate-100">
                 <td
-                  style={{ left: 0, width: 150 }}
-                  className="sticky left-0 z-20 bg-slate-100 px-3 py-1.5 font-bold text-slate-800 border-b border-r border-slate-200"
+                  style={{
+                    left: 0,
+                    width: STAFF_NAME_COLUMN_WIDTH,
+                    minWidth: STAFF_NAME_COLUMN_WIDTH,
+                    maxWidth: STAFF_NAME_COLUMN_WIDTH,
+                  }}
+                  className="sticky left-0 z-20 bg-slate-100 px-3 py-1.5 font-bold text-slate-800 border-b border-r border-slate-200 shadow-[2px_0_4px_-2px_rgba(15,23,42,0.35)]"
                 >
                   人員充足判定 (FTE基準)
                 </td>
                 <td
-                  style={{ left: 150, width: 110 }}
-                  className="sticky left-[150px] z-20 bg-slate-100 border-b border-r border-slate-200"
-                />
-                <td
-                  style={{ left: 260, width: 95 }}
-                  className="sticky left-[260px] z-20 bg-slate-100 border-b border-r border-slate-200"
+                  style={{ left: STAFF_NAME_COLUMN_WIDTH, width: 95 }}
+                  className="sticky left-[180px] z-20 bg-slate-100 border-b border-r border-slate-200"
                 />
                 {days.map((day) => {
                   const cov = validation.dailyCoverageSummary[day.date];

@@ -674,7 +674,7 @@ export function generateAutomatedSchedule(
       }
 
       // 土日の出勤平準化
-      if (day.isWeekend && plan.rules.balanceWeekendShifts) {
+      if (day.isWeekend) {
         score -= (staffWeekendCounts[staff.id] || 0) * 30;
       }
 

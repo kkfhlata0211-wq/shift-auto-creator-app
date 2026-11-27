@@ -116,8 +116,10 @@ export interface ConstraintRules {
   nightShiftNextRule: 'HOLIDAY_OR_NEXT' | 'MANDATORY_NEXT'; // 夜勤翌日のルール
   nightShiftLinkRule?: NightShiftLinkRule; // 夜勤後に明番・公休を自動割当するルール
   enableNgPairCheck: boolean;       // NGペアの制約有効フラグ
-  balanceWeekendShifts: boolean;    // 土日祝の出勤回数平準化
-  balanceNightShifts: boolean;      // 夜勤回数の平準化
+  /** @deprecated Retained for saved-data compatibility; weekend balancing is always enabled. */
+  balanceWeekendShifts: boolean;
+  /** @deprecated Retained for saved-data compatibility; night balancing is always enabled. */
+  balanceNightShifts: boolean;
   minRestHoursBetweenShifts: number;// 勤務間インターバル（例: 遅番翌日の早番禁止：11時間以上推奨）
   defaultRequirements: {
     EARLY: number;

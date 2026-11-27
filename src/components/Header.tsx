@@ -1,5 +1,5 @@
 import React from 'react';
-import { Play, Sparkles, Download, Upload, FileSpreadsheet, RotateCcw, AlertTriangle, Users, Sliders, ChevronDown, ChevronUp } from 'lucide-react';
+import { Play, Sparkles, Download, Upload, FileSpreadsheet, RotateCcw, AlertTriangle, Users, Sliders, ChevronDown, ChevronUp, FolderOpen } from 'lucide-react';
 import { MonthlySchedulePlan } from '../types/shift';
 import { exportPlanAsCsv, exportPlanAsJson } from '../utils/storage';
 
@@ -197,7 +197,9 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* JSON保存 */}
           <button
-            onClick={() => exportPlanAsJson(plan)}
+            onClick={() => {
+              void exportPlanAsJson(plan);
+            }}
             title="現在のプロジェクト設定とシフトをJSONでバックアップ"
             className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-medium border border-slate-300 transition-colors"
           >
@@ -205,14 +207,25 @@ export const Header: React.FC<HeaderProps> = ({
             <span>保存</span>
           </button>
 
-          {/* JSON復元 */}
+          <button
+            onClick={() => {
+              void exportPlanAsJson(plan, true);
+            }}
+            title="JSONファイルの保存先を選び直す"
+            className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-medium border border-slate-300 transition-colors"
+          >
+            <FolderOpen className="w-4 h-4 text-slate-600" />
+            <span>保存先を変更</span>
+          </button>
+
+          {/* JSONデータ読み込み */}
           <button
             onClick={() => fileInputRef.current?.click()}
             title="保存したJSONファイルを読み込み"
             className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-medium border border-slate-300 transition-colors"
           >
             <Upload className="w-4 h-4 text-amber-600" />
-            <span>復元</span>
+            <span>データ読み込み</span>
           </button>
           <input
             ref={fileInputRef}

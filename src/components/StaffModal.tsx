@@ -4,6 +4,7 @@ import { X, UserPlus, Trash2, Edit2, Check, Moon, Users, Calendar } from 'lucide
 import { Staff, EmploymentType, ShiftType, ShiftTypeId } from '../types/shift';
 import { DEFAULT_PART_TIME_DAILY_WORK_HOURS } from '../engine/partTimeRules';
 import { getShiftTypeColorPresentation } from '../utils/shiftColors';
+import { getStaffDisplayOrder } from '../utils/staffOrder';
 
 interface StaffModalProps {
   isOpen: boolean;
@@ -22,9 +23,7 @@ export const StaffModal: React.FC<StaffModalProps> = ({
 }) => {
   const [editingStaffId, setEditingStaffId] = useState<string | null>(null);
   const [isAdding, setIsAdding] = useState(false);
-  const sortedStaffList = [...staffList].sort(
-    (first, second) => Number(first.employmentType === 'PART_TIME') - Number(second.employmentType === 'PART_TIME')
-  );
+  const sortedStaffList = getStaffDisplayOrder(staffList);
   const assignableShiftTypes = Object.values(shiftTypes).filter(
     (shiftType) => shiftType.isWork && !shiftType.isNight && shiftType.id !== 'PAID_LEAVE'
   );

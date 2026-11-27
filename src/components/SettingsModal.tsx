@@ -5,9 +5,10 @@ import {
   getNightShiftLinkRule,
   NIGHT_SHIFT_LINK_RULES,
   ShiftType,
+  ShiftTypeId,
 } from '../types/shift';
 import { ShiftTypeManager } from './ShiftTypeManager';
-import { getShiftColorPresentation } from '../utils/shiftColors';
+import { getShiftTypeColorPresentation } from '../utils/shiftColors';
 import { getOrderedShiftTypes } from '../utils/shiftTypeOrder';
 
 interface SettingsModalProps {
@@ -37,10 +38,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   }, [isOpen, rules, shiftTypes]);
 
-  const customWorkShiftTypes = getOrderedShiftTypes(formShiftTypes).filter(
-    (shiftType) =>
-      shiftType.isWork &&
-      !['DAY', 'EARLY', 'LATE', 'NIGHT', 'NIGHT_NEXT', 'HOLIDAY', 'PAID_LEAVE'].includes(shiftType.id)
+  const requiredShiftTypes = getOrderedShiftTypes(formShiftTypes).filter(
+    (shiftType) => shiftType.isWork && shiftType.id !== 'PAID_LEAVE'
   );
   const updateCustomRequiredStaff = (id: string, value: number) => {
     setFormShiftTypes((previous) => ({
@@ -50,6 +49,38 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         requiredStaff: Math.max(0, Math.min(99, Math.floor(value) || 0)),
       },
     }));
+  };
+  const getRequiredStaff = (shiftType: ShiftType): number => {
+    switch (shiftType.id) {
+      case 'EARLY':
+        return formRules.defaultRequirements?.EARLY ?? 1;
+      case 'DAY':
+        return formRules.defaultRequirements?.DAY ?? 2;
+      case 'LATE':
+        return formRules.defaultRequirements?.LATE ?? 1;
+      case 'NIGHT':
+        return formRules.defaultRequirements?.NIGHT ?? 1;
+      default:
+        return shiftType.requiredStaff ?? 0;
+    }
+  };
+  const updateRequiredStaff = (shiftId: ShiftTypeId, value: number) => {
+    switch (shiftId) {
+      case 'EARLY':
+      case 'DAY':
+      case 'LATE':
+      case 'NIGHT':
+        setFormRules((previous) => ({
+          ...previous,
+          defaultRequirements: {
+            ...previous.defaultRequirements,
+            [shiftId]: value,
+          },
+        }));
+        break;
+      default:
+        updateCustomRequiredStaff(shiftId, value);
+    }
   };
 
   if (!isOpen) return null;
@@ -184,29 +215,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <span>NGペア制約（スタッフ同士の同一シフト同席禁止）を有効にする</span>
               </label>
 
-              <label className="flex items-center gap-2 cursor-pointer font-semibold">
-                <input
-                  type="checkbox"
-                  checked={formRules.balanceWeekendShifts}
-                  onChange={(e) =>
-                    setFormRules({ ...formRules, balanceWeekendShifts: e.target.checked })
-                  }
-                  className="w-4 h-4 text-blue-600 rounded"
-                />
-                <span>土日祝の出勤回数をスタッフ間で公平に平準化する</span>
-              </label>
-
-              <label className="flex items-center gap-2 cursor-pointer font-semibold">
-                <input
-                  type="checkbox"
-                  checked={formRules.balanceNightShifts}
-                  onChange={(e) =>
-                    setFormRules({ ...formRules, balanceNightShifts: e.target.checked })
-                  }
-                  className="w-4 h-4 text-blue-600 rounded"
-                />
-                <span>{formShiftTypes.NIGHT?.name || '夜勤'}可能スタッフ間での回数を公平に平準化する</span>
-              </label>
             </div>
           </div>
 
@@ -217,119 +225,48 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </h3>
 
             <div className="grid grid-cols-4 items-start gap-3">
-              <div className="bg-lime-50/70 border border-lime-200 p-3 rounded-xl">
-                <label className="block font-bold text-lime-900 mb-1">{formShiftTypes.EARLY?.name || '早番'} 必要人数</label>
-                <input
-                  type="number"
-                  min={0}
-                  max={10}
-                  value={formRules.defaultRequirements?.EARLY ?? 1}
-                  onChange={(e) =>
-                    setFormRules({
-                      ...formRules,
-                      defaultRequirements: {
-                        ...formRules.defaultRequirements,
-                        EARLY: Number(e.target.value),
-                      },
-                    })
-                  }
-                  className="w-full px-3 py-1.5 bg-white border border-lime-300 rounded-lg text-center font-bold"
-                />
-              </div>
-
-              <div className="bg-blue-50/70 border border-blue-200 p-3 rounded-xl">
-                <label className="block font-bold text-blue-900 mb-1">{formShiftTypes.DAY?.name || '日勤'} 必要人数</label>
-                <input
-                  type="number"
-                  min={0}
-                  max={10}
-                  value={formRules.defaultRequirements?.DAY ?? 2}
-                  onChange={(e) =>
-                    setFormRules({
-                      ...formRules,
-                      defaultRequirements: {
-                        ...formRules.defaultRequirements,
-                        DAY: Number(e.target.value),
-                      },
-                    })
-                  }
-                  className="w-full px-3 py-1.5 bg-white border border-blue-300 rounded-lg text-center font-bold"
-                />
-              </div>
-
-              <div className="bg-orange-50/70 border border-orange-200 p-3 rounded-xl">
-                <label className="block font-bold text-orange-900 mb-1">{formShiftTypes.LATE?.name || '遅番'} 必要人数</label>
-                <input
-                  type="number"
-                  min={0}
-                  max={10}
-                  value={formRules.defaultRequirements?.LATE ?? 1}
-                  onChange={(e) =>
-                    setFormRules({
-                      ...formRules,
-                      defaultRequirements: {
-                        ...formRules.defaultRequirements,
-                        LATE: Number(e.target.value),
-                      },
-                    })
-                  }
-                  className="w-full px-3 py-1.5 bg-white border border-orange-300 rounded-lg text-center font-bold"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <div className="bg-purple-50/70 border border-purple-200 p-3 rounded-xl">
-                  <label className="block font-bold text-purple-900 mb-1">{formShiftTypes.NIGHT?.name || '夜勤'} 必要人数</label>
-                  <input
-                    type="number"
-                    min={0}
-                    max={10}
-                    value={formRules.defaultRequirements?.NIGHT ?? 1}
-                    onChange={(e) =>
-                      setFormRules({
-                        ...formRules,
-                        defaultRequirements: {
-                          ...formRules.defaultRequirements,
-                          NIGHT: Number(e.target.value),
-                        },
-                      })
-                    }
-                    className="w-full px-3 py-1.5 bg-white border border-purple-300 rounded-lg text-center font-bold"
-                  />
-                </div>
-                <p className="px-1 text-[10px] font-semibold leading-relaxed text-red-600">
-                  ※ 夜勤がない場合は、必要人数を0に設定してください。
-                </p>
-              </div>
-              {customWorkShiftTypes.map((shiftType) => {
-                const color = getShiftColorPresentation(shiftType.color, shiftType.textColor);
-                return (
+              {requiredShiftTypes.map((shiftType) => {
+                const isCustom = !['EARLY', 'DAY', 'LATE', 'NIGHT'].includes(shiftType.id);
+                const color = getShiftTypeColorPresentation(shiftType);
+                const inputBorderClass =
+                  shiftType.id === 'EARLY'
+                    ? 'border-lime-300'
+                    : shiftType.id === 'DAY'
+                      ? 'border-blue-300'
+                      : shiftType.id === 'LATE'
+                        ? 'border-orange-300'
+                        : shiftType.id === 'NIGHT'
+                          ? 'border-purple-300'
+                          : 'border-slate-300';
+                const card = (
                   <div
-                    key={shiftType.id}
                     className={`rounded-xl border p-3 ${color.className}`}
                     style={color.style}
                   >
-                    <div className="mb-1 flex items-center gap-2">
-                      <span
-                        className="inline-flex min-w-7 h-7 items-center justify-center rounded px-1 text-xs font-black"
-                        style={color.style}
-                      >
-                        {shiftType.shortName}
-                      </span>
-                      <label htmlFor={`required_${shiftType.id}`} className="min-w-0 truncate text-xs font-bold">
-                        {shiftType.name} 必要人数
-                      </label>
-                    </div>
+                    <label htmlFor={`required_${shiftType.id}`} className="mb-1 block truncate text-xs font-bold">
+                      {shiftType.name} 必要人数
+                    </label>
                     <input
                       id={`required_${shiftType.id}`}
                       type="number"
                       min={0}
-                      max={99}
-                      value={shiftType.requiredStaff ?? 0}
-                      onChange={(event) => updateCustomRequiredStaff(shiftType.id, Number(event.target.value))}
-                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-center font-bold"
+                      max={isCustom ? 99 : 10}
+                      value={getRequiredStaff(shiftType)}
+                      onChange={(event) => updateRequiredStaff(shiftType.id, Number(event.target.value))}
+                      className={`w-full rounded-lg border bg-white px-3 py-1.5 text-center font-bold ${inputBorderClass}`}
                     />
                   </div>
+                );
+
+                return shiftType.id === 'NIGHT' ? (
+                  <div key={shiftType.id} className="space-y-1.5">
+                    {card}
+                    <p className="px-1 text-[10px] font-semibold leading-relaxed text-red-600">
+                      ※ 夜勤がない場合は、必要人数を0に設定してください。
+                    </p>
+                  </div>
+                ) : (
+                  <React.Fragment key={shiftType.id}>{card}</React.Fragment>
                 );
               })}
             </div>
@@ -341,7 +278,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         </div>
 
         {/* モーダルフッター */}
-        <div className="px-6 py-3 border-t border-slate-200 flex justify-end gap-2 bg-slate-50">
+        <div className="px-6 py-3 border-t border-slate-200 flex justify-center gap-2 bg-slate-50">
           <button
             onClick={onClose}
             className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-200 rounded-lg transition-colors"
